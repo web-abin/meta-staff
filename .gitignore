@@ -1,0 +1,45 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# build
+.next/
+dist/
+out/
+build/
+.turbo/
+
+# Go
+bin/
+*.test
+*.out
+vendor/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker / data
+.docker-data/
+data/postgres/
+
+# planning artifacts kept tracked
+# (task_plan.md / findings.md / progress.md are intentionally committed)
+.planning/

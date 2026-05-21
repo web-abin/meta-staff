@@ -1,0 +1,26 @@
+{
+  "name": "meta-staff",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Digital employees + DAG workflow platform",
+  "packageManager": "pnpm@10.19.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "server:dev": "cd apps/server && go run ./cmd/server",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f postgres"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=10"
+  }
+}

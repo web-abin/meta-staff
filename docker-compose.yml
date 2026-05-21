@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: meta-staff-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-meta}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-meta}
+      POSTGRES_DB: ${POSTGRES_DB:-meta_staff}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-meta} -d ${POSTGRES_DB:-meta_staff}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
