@@ -195,3 +195,10 @@ meta-staff/
 ## License
 
 私有项目，暂未发布。
+
+
+
+ssh-keygen -t ed25519 -C "1872495742@qq.com"
+
+
+ssh-keygen -t ed25519 -C "abc@163.com"

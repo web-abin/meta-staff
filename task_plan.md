@@ -65,6 +65,17 @@
 - [x] Playwright 录屏：`scripts/playwright-record.mjs` 起 chromium 录 5s `.webm`（自动滚动 + 鼠标移动），落到 `runtime/recordings/{taskID}.webm`，前端 `<video>` 直播；缺 playwright 时优雅回退
 - **Status:** complete
 
+### Phase 9: Hermes Agent 集成（2026-05-21）
+- [x] 摸清 hermes-agent API surface（HTTP API Server :8642 + MCP + ACP + Python API；详见 findings.md）
+- [x] PoC：`internal/llm/hermes.go` 实现 `Provider` 接口，走 `/v1/chat/completions`（同步 = 一次完整 agent run）
+- [x] `Default()` 优先级 HERMES > ANTHROPIC > mock；`.env.example` 补 3 个 HERMES_* 变量
+- [x] `go build ./... + go vet` 通过
+- [ ] **用户侧**：在云服务器跑 hermes（`docker-compose up`，配 `API_SERVER_KEY/HOST=0.0.0.0` + LLM key），开放 8642 端口
+- [ ] 实测：从 meta-staff 触发 AI 节点，确认 hermes 端真跑了工具（写文件 / 发 IM / 跑代码），meta-staff artifact 收到最终输出
+- [ ] **Phase 2**：meta-staff 自己暴露成 MCP server（`submit_artifact / advance_node / send_im_via_feishu`），写进 hermes 的 `~/.hermes/config.yaml`，hermes 可反向调
+- [ ] **Phase 3**：切到 `/v1/runs` + SSE，把 `tool.start / tool.result` 透传 meta-staff WebSocket 流式可视化
+- **Status:** PoC 代码完成；待用户云服务器部署 hermes 后做端到端实测
+
 ### Phase 6: 自定义工作流 + 技能沉淀
 - [x] 数字员工自定义（API + UI 创建表单）— 可作为新节点指派对象
 - [x] 工作流自定义 API：`POST /workflows/:id/versions` 接收 DAG JSON，自增版本

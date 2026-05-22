@@ -121,6 +121,38 @@
   - smoke 全 10 节点 done；磁盘落 `runtime/previews/<id>/index.html`（4.6KB） + `runtime/recordings/<id>.webm`（500KB+）
   - 浏览器实拍 `/preview/<id>`：iframe 内嵌真实静态预览页（编辑工业风），`<video controls>` 0:00/0:05 时间轴展示录屏，0 console errors
 
+### Phase 9（2026-05-21）：Hermes Agent 集成 PoC
+- **Status:** code complete, awaiting cloud deploy
+- 起因：用户希望"数字员工平台和 agent hermes 打通，让 AI 自动写代码 + 发 IM"。最初误判 hermes 是 facebook/hermes（JS 引擎），用户澄清为 NousResearch/hermes-agent
+- 调研：
+  - clone `https://github.com/NousResearch/hermes-agent` → `/tmp/hermes-agent`
+  - Explore agent 摸 API surface：发现 hermes 自带 **HTTP API Server**（`gateway/platforms/api_server.py`），默认 8642，Bearer auth
+  - 实测验证 `/v1/chat/completions` 内部跑 `_create_agent(...)` 完整 agent loop（含 `_on_tool_start` 工具回调），不是单纯 LLM 转发
+  - 验证 `/v1/runs` 异步 + SSE 模式存在（line 2863+ / 3173+），Phase 3 用
+- 关键架构判断：
+  - hermes 是 **agent**，不是 LLM；本来想塞 `pkg/llm/`，结论是能塞 —— 因为它的 `/v1/chat/completions` 把 agent run 包装成了同步 OpenAI 兼容接口
+  - **PoC 用 chat completions（同步）而非 runs（异步）**：现有 `Provider.Complete(ctx, Request) (string, error)` 接口零修改可对接；流式可视化留 Phase 3
+- 实施：
+  - 新增 `apps/server/internal/llm/hermes.go`（mirror `anthropic.go` 结构，HTTP timeout 600s 适配长 agent loop）
+  - 改 `internal/llm/llm.go` 的 `Default()`：优先级 `HERMES_BASE_URL > ANTHROPIC_API_KEY > mock`
+  - 改 `.env.example` 加 `HERMES_BASE_URL / HERMES_API_KEY / HERMES_MODEL`
+- Verification:
+  - `go build -buildvcs=false ./...` ✅
+  - `go vet ./internal/llm/...` ✅
+  - 端到端实测需要用户在云服务器先部署 hermes（docker-compose up + 开 8642 + 配 LLM key），暂未跑通
+- Files created/modified:
+  - apps/server/internal/llm/hermes.go (created, 109 lines)
+  - apps/server/internal/llm/llm.go (Default 优先级调整)
+  - .env.example (HERMES_* 三段 + 注释说明)
+  - findings.md（Hermes Agent 集成 章节）
+  - task_plan.md（Phase 9）
+- 用户侧 next step：
+  1. 云服务器 clone hermes-agent + `docker-compose up`
+  2. 配 `API_SERVER_KEY` + `API_SERVER_HOST=0.0.0.0` + `OPENROUTER_API_KEY` 之类
+  3. 开 8642 端口（或反代 443）
+  4. meta-staff `.env` 填 hermes URL + key → `make demo` 重启 → 创建任务实测
+- 已知未确认项：hermes 工具默认启用范围 / LLM 后端选择 / 长任务超时阈值，要部署后观察
+
 ## Test Results
 | Test | Input | Expected | Actual | Status |
 |------|-------|----------|--------|--------|

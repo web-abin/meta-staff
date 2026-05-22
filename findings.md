@@ -117,4 +117,78 @@ skill(id, employee_id, embedding, summary, source_node_run_id)
 - 支持 11 种 Agent CLI（Claude Code / Codex / Copilot CLI / Cursor Agent / Kimi / Gemini / ...）
 
 ---
+
+## Hermes Agent 集成（2026-05-21）
+
+### Hermes 是什么 + 关键能力
+- 来源：[NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)
+- 形态：**自主 agent**（不是单纯 LLM），自带 40+ 工具：代码执行、文件读写、HTTP、Telegram/Discord/Slack/WhatsApp/Email 网关、cron、MCP client
+- 长期记忆：SQLite `~/.hermes/state.db`，WAL 模式支持并发多 session
+- LLM 后端可换：OpenAI / Anthropic / OpenRouter / 任意自定义 endpoint
+
+### 暴露的接口（实测代码确认）
+| Endpoint | 用途 | 说明 |
+|---|---|---|
+| `POST /v1/chat/completions` | OpenAI 兼容，**单次调用 = 一次完整 agent run** | hermes 内部跑完工具循环再返回最终文本 |
+| `POST /v1/runs` → `run_id` | 异步 agent run | 配 SSE 流式拿 tool call 进度 |
+| `GET /v1/runs/{id}/events` | SSE 事件流 | `message.delta` / `tool.start` / `tool.result` / `approval.request` |
+| `POST /v1/runs/{id}/approval` | 解 approval | 人工卡点放行 |
+| `POST /v1/runs/{id}/stop` | 中断 | |
+
+- 默认端口 **8642**，Bearer token (`API_SERVER_KEY`) 鉴权
+- `API_SERVER_HOST=0.0.0.0` 才能跨机访问（不设强制 127.0.0.1）
+- 可选 header：`X-Hermes-Session-Id` 续 session，`X-Hermes-Session-Key` 长期记忆隔离
+
+### 验证来源
+- `/tmp/hermes-agent/gateway/platforms/api_server.py`：
+  - 路由注册 line 3405-3423
+  - `_handle_chat_completions` line 1024+（含 `_create_agent`、`_on_tool_start`，确认是完整 agent loop 而非单次 LLM）
+  - `_handle_runs` line 2863+（async, 返回 run_id）
+  - `_handle_run_events` line 3173+（SSE）
+  - 鉴权常量 line 642-647
+
+### 决定：用 `/v1/chat/completions` 做 PoC（不用 `/v1/runs`）
+
+**理由**：
+- chat completions 在 hermes 是**完整 agent run 的同步外壳** —— `Provider.Complete()` 接口零改动可对接
+- runs API 是异步的（202 + 轮询/SSE），现阶段不需要细粒度进度推送，留 Phase 3 再做
+- 已有 mock / anthropic 两个 provider 走同样的 sync 接口，hermes 加成第三个，调用侧（`workflow/engine.go` 的 `runAgent`）零修改
+
+### 切换语义对比
+| Provider | "AI 写代码" 节点输出 |
+|---|---|
+| `mock` | 写死的伪 markdown（含 preview_url 占位） |
+| `anthropic` | LLM 生成的 markdown 描述代码（**不真的运行**） |
+| `hermes` | LLM + hermes 内置工具**真的执行**：写文件、跑命令、发 IM、调 MCP，最终回报告 |
+
+这是用户"AI 自动写代码、自动发 IM"这个核心需求的**实际兑现路径** —— 之前 anthropic 模式下永远只是描述，hermes 模式才会真做。
+
+### 实施落地
+- 新增：`apps/server/internal/llm/hermes.go`（mirror anthropic 结构）
+- 改：`internal/llm/llm.go` 的 `Default()`：优先级 `HERMES_BASE_URL > ANTHROPIC_API_KEY > mock`
+- 改：`.env.example` 加 `HERMES_BASE_URL / HERMES_API_KEY / HERMES_MODEL` 三段
+- 验证：`go build ./... + go vet ./internal/llm/...` 通过
+
+### 用户侧待办（云服务器）
+1. `git clone https://github.com/NousResearch/hermes-agent.git`
+2. 配 `.env`：`API_SERVER_KEY=<openssl rand -hex 32>` + `API_SERVER_HOST=0.0.0.0` + `OPENROUTER_API_KEY=` 或其他 LLM key
+3. `docker-compose up -d`（仓库自带 `docker-compose.yml`）
+4. 防火墙开 8642（或反代到 443）
+5. meta-staff 这边 `.env` 填 `HERMES_BASE_URL=http://<cloud-ip>:8642 / HERMES_API_KEY=<same key>`，重启 server 即生效
+
+### Phase 2 计划（后续）
+- meta-staff 提供 MCP server：把 `submit_artifact / advance_node / send_im_via_feishu / mark_node_done` 暴露成 MCP tools
+- hermes 配 `~/.hermes/config.yaml` 加入这个 MCP server，hermes 在 agent loop 中可反向调回 meta-staff
+- 这样数字员工节点的"产物落库 / 节点推进 / 飞书通知"由 hermes 主动完成，meta-staff 引擎只编排 DAG
+
+### Phase 3 计划（流式可视化）
+- 切到 `/v1/runs` + SSE，把 `tool.start / tool.result / message.delta` 透传到 meta-staff WebSocket
+- 前端 `/tasks/[id]` 节点卡实时显示 hermes 正在跑哪个工具
+
+### 还需验证的（动手部署后才能确认）
+- hermes 的工具列表在 docker 镜像里**默认启用了哪些**？docker-entrypoint 是否需要额外参数
+- 配置 LLM 后端：用 OpenRouter（多模型）还是直连 Anthropic 自己的 API key？
+- 长任务超时：当前 hermes provider 设了 600s timeout，hermes 的写代码节点可能更长，要观察
+
+---
 *Update this file after every 2 view/browser/search operations*
