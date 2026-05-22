@@ -21,18 +21,21 @@ web:
 	pnpm --filter @meta-staff/web dev
 
 server:
-	cd apps/server && DATABASE_URL= \
-	  RUNTIME_DIR=$(RUNTIME) \
-	  RECORDER_PATH=$(RECORDER) \
-	  go run -buildvcs=false ./cmd/server
+	@set -a; [ -f $(ROOT)/.env ] && . $(ROOT)/.env; set +a; \
+	  cd apps/server && DATABASE_URL= \
+	    RUNTIME_DIR=$(RUNTIME) \
+	    RECORDER_PATH=$(RECORDER) \
+	    go run -buildvcs=false ./cmd/server
 
-# zero-deps demo: memory store + mock LLM + real sandbox previews + Playwright recording
+# zero-deps demo: memory store + sandbox previews + Playwright recording
+# LLM provider picked by .env: HERMES_BASE_URL > ANTHROPIC_API_KEY > mock
 demo:
-	@echo "→ memory mode (no postgres, no anthropic key). Visit http://localhost:3000"
-	@(cd apps/server && DATABASE_URL= \
-	  RUNTIME_DIR=$(RUNTIME) \
-	  RECORDER_PATH=$(RECORDER) \
-	  go run -buildvcs=false ./cmd/server) & \
+	@echo "→ memory mode. Visit http://localhost:3000"
+	@(set -a; [ -f $(ROOT)/.env ] && . $(ROOT)/.env; set +a; \
+	  cd apps/server && DATABASE_URL= \
+	    RUNTIME_DIR=$(RUNTIME) \
+	    RECORDER_PATH=$(RECORDER) \
+	    go run -buildvcs=false ./cmd/server) & \
 	 pnpm --filter @meta-staff/web dev
 
 dev: db-up

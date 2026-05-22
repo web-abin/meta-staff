@@ -43,3 +43,6 @@ data/postgres/
 # planning artifacts kept tracked
 # (task_plan.md / findings.md / progress.md are intentionally committed)
 .planning/
+
+# 个人笔记 / 本地参考文档（含可能的密钥）
+我的文档/
