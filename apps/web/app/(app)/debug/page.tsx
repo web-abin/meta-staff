@@ -314,7 +314,7 @@ export default function DebugPage() {
           </div>
         )}
 
-        {workspace?.enabled && workspace.files.length === 0 && (
+        {workspace?.enabled && (workspace.files?.length ?? 0) === 0 && (
           <div
             className="mt-3 p-3 rounded-md text-[12px]"
             style={{ background: "var(--bg-soft)", color: "var(--text-3)" }}
@@ -323,9 +323,9 @@ export default function DebugPage() {
           </div>
         )}
 
-        {workspace?.enabled && workspace.files.length > 0 && (
+        {workspace?.enabled && (workspace.files?.length ?? 0) > 0 && (
           <ul className="mt-3 space-y-1.5">
-            {workspace.files.map((f) => (
+            {workspace.files!.map((f) => (
               <li
                 key={f.path}
                 className="flex items-center gap-2 text-[13px] p-2 rounded-md"

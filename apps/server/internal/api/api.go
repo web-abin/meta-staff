@@ -1186,7 +1186,9 @@ func (d Deps) debugWorkspace(w http.ResponseWriter, r *http.Request) {
 		Size int64  `json:"size"`
 		Mod  string `json:"modified"`
 	}
-	var out []entry
+	// 注意：必须 []entry{} 初始化，不能 var []entry（nil），否则序列化成 JSON null
+	// 前端会在 (null).length 上崩。
+	out := []entry{}
 	filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 		if err != nil || info == nil || info.IsDir() {
 			return nil
