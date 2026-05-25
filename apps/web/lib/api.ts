@@ -127,8 +127,12 @@ export const api = {
 
   tasks: () => listRequest<Task>("/tasks"),
   task: (id: string) => request<TaskDetail>(`/tasks/${id}`),
-  createTask: (body: { title: string; source: string; content: string }) =>
-    request<Task>("/tasks", { method: "POST", json: body }),
+  createTask: (body: {
+    title: string;
+    source: string;
+    content: string;
+    attachments?: { name: string; url: string; mime?: string; kind: string; size?: number }[];
+  }) => request<Task>("/tasks", { method: "POST", json: body }),
 
   submitNodeRun: (runID: string, kind: string, payload: unknown) =>
     request<{ ok: true }>(`/node-runs/${runID}/submit`, {

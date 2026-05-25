@@ -625,10 +625,11 @@ func (d Deps) listTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 type createTaskBody struct {
-	Title    string  `json:"title"`
-	Source   string  `json:"source"`
-	Content  string  `json:"content"`
-	UserID   *string `json:"user_id"`
+	Title       string                   `json:"title"`
+	Source      string                   `json:"source"`
+	Content     string                   `json:"content"`
+	Attachments []map[string]any         `json:"attachments,omitempty"`
+	UserID      *string                  `json:"user_id"`
 }
 
 func (d Deps) createTask(w http.ResponseWriter, r *http.Request) {
@@ -670,6 +671,7 @@ func (d Deps) createTask(w http.ResponseWriter, r *http.Request) {
 		Title:             b.Title,
 		Source:            b.Source,
 		Content:           b.Content,
+		Attachments:       b.Attachments,
 		CreatedBy:         uid,
 	})
 	if err != nil {

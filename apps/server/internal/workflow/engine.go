@@ -71,11 +71,15 @@ func (e *Engine) StartTaskWithIntake(ctx context.Context, p StartParams) (model.
 	if err != nil {
 		return t, err
 	}
-	// Save intake artifact (raw content)
+	// Save intake artifact (raw content + optional attachments uploaded by submitter)
+	intakePayload := map[string]any{"content": p.Content, "source": p.Source}
+	if len(p.Attachments) > 0 {
+		intakePayload["attachments"] = p.Attachments
+	}
 	if _, err := q.CreateArtifact(ctx, store.CreateArtifactParams{
 		NodeRunID: run.ID,
 		Kind:      "raw",
-		Payload:   mustJSON(map[string]any{"content": p.Content, "source": p.Source}),
+		Payload:   mustJSON(intakePayload),
 	}); err != nil {
 		return t, err
 	}
@@ -95,6 +99,7 @@ type StartParams struct {
 	Title             string
 	Source            string
 	Content           string
+	Attachments       []map[string]any
 	Payload           json.RawMessage
 	CreatedBy         *uuid.UUID
 }

@@ -8,6 +8,7 @@ import { useT } from "../../../lib/i18n";
 import { isAdmin, useUser } from "../../../lib/user";
 import type { Employee } from "../../../lib/types";
 import { HeaderSettings } from "../../_components/header-settings";
+import { CreateTaskModal } from "./create-task-modal";
 import { ProfileModal } from "./profile-modal";
 
 export function Topbar() {
@@ -17,6 +18,7 @@ export function Topbar() {
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [employee, setEmployee] = useState<Employee | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -68,6 +70,16 @@ export function Topbar() {
       </nav>
 
       <div className="ml-auto flex items-center gap-3">
+        {!admin && (
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            className="btn btn-primary btn-sm"
+            title={t("new_task.subtitle")}
+          >
+            {t("header.new_task")}
+          </button>
+        )}
         {!admin && empId && (
           <div
             className="flex items-center gap-2 px-3 py-1 rounded-md text-[12px]"
@@ -139,6 +151,8 @@ export function Topbar() {
           }}
         />
       )}
+
+      {createOpen && <CreateTaskModal onClose={() => setCreateOpen(false)} />}
     </header>
   );
 }
