@@ -11,6 +11,18 @@ echo "▶ project root: $ROOT"
 echo "[1/5] git pull"
 git pull
 
+# 1.5: 给 .env 补缺失的关键变量（一次性写入，已有则跳过）
+if [ -f .env ]; then
+  ensure_env() {
+    local key=$1; local val=$2
+    if ! grep -q "^${key}=" .env; then
+      echo "  + adding ${key}=${val} to .env"
+      echo "${key}=${val}" >> .env
+    fi
+  }
+  ensure_env HERMES_WORKSPACE_DIR /root/hermes-workspace
+fi
+
 echo "[2/5] pnpm install"
 pnpm install --prefer-offline
 
