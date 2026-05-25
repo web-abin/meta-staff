@@ -207,49 +207,23 @@ ssh-keygen -t ed25519 -C "abc@163.com"
 
 > 本地改完代码 → `git push` → ssh 到 `49.233.191.112` → 跑下面任一方案。
 
-### 方案 A：一键脚本（推荐 · 首次创建后每次只跑一条命令）
+### 方案 A：一键脚本（推荐）
 
-**首次只做一次** — ssh 上服务器后，用 vim 创建脚本：
-
-```bash
-vim /root/redeploy.sh
-```
-
-按 `i` 进入插入模式，粘贴下面整段（vim 不会处理粘贴缩进，避免之前终端拆行的坑）：
+脚本已经在仓库里 — [`scripts/redeploy.sh`](scripts/redeploy.sh)。本地 `git push` 之后，ssh 上服务器一条命令搞定：
 
 ```bash
-#!/bin/bash
-set -e
-cd ~/meta-staff
-echo "[1/5] git pull"
-git pull
-echo "[2/5] pnpm install"
-pnpm install --prefer-offline
-echo "[3/5] kill old tmux"
-tmux kill-session -t ms-be 2>/dev/null || true
-tmux kill-session -t ms-fe 2>/dev/null || true
-tmux kill-session -t metastaff 2>/dev/null || true
-echo "[4/5] start tmux: metastaff"
-tmux new -d -s metastaff 'cd ~/meta-staff && make demo 2>&1 | tee /tmp/metastaff.log'
-echo "[5/5] wait 20s and verify..."
-sleep 20
-echo "--- llm provider ---"
-grep -E 'llm provider|listening' /tmp/metastaff.log | tail -5
-echo "--- ports ---"
-ss -tlnp 2>/dev/null | grep -E ':3000|:8080'
-echo "--- healthz ---"
-curl -sS -m 3 http://127.0.0.1:8080/api/healthz
-echo
-echo "done. http://49.233.191.112:3000/"
+cd ~/meta-staff && bash scripts/redeploy.sh
 ```
 
-`Esc` → `:wq` 保存。`chmod +x /root/redeploy.sh` 一次。
+脚本会自动：
+1. `git pull` 拉最新代码
+2. `pnpm install --prefer-offline` 装/更新依赖
+3. kill 老的 tmux session（`ms-be` / `ms-fe` / `metastaff` 三个名都清掉）
+4. 在 tmux session `metastaff` 里启 `make demo`，日志落 `/tmp/metastaff.log`
+5. 等 20s 后验证：provider 是不是 hermes、:3000/:8080 端口、`/api/healthz`、打印公网地址
 
-**以后每次部署只跑一条**：
-
-```bash
-bash /root/redeploy.sh
-```
+> 仓库里 `scripts/redeploy.sh` 已经 `chmod +x`，所以也可以直接 `./scripts/redeploy.sh`。
+> 项目根用 `dirname $0` 自动算出，脚本搬到别的服务器路径也照常工作。
 
 ### 方案 B：纯前端改动（更快 · 不重启 server）
 
@@ -291,5 +265,5 @@ ss -tlnp | grep -E ':3000|:8080|:8642'
 ```bash
 tmux kill-server 2>/dev/null
 docker restart hermes
-bash /root/redeploy.sh
+cd ~/meta-staff && bash scripts/redeploy.sh
 ```
