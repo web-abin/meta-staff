@@ -74,6 +74,19 @@ func (m *memQ) seed() {
 		Role: "admin", CreatedAt: now,
 	}
 
+	// admin 同时是一个 Employee（bound_user_id = adminID），这样 admin 也能
+	// 出现在工作流员工列表 / 被绑定到节点。
+	adminEmpID := uuid.MustParse("22222222-2222-2222-2222-2222222222ad")
+	adminAv := "管"
+	adminTools, _ := json.Marshal([]string{"search-skill"})
+	uidCopy := adminID
+	m.employees[adminEmpID] = model.Employee{
+		ID: adminEmpID, WorkspaceID: wsID, Role: "admin", Name: "管理员",
+		Avatar: &adminAv, SystemPrompt: "你是管理员/老板 · 拥有完整权限，可在任何节点把关。",
+		Tools: adminTools, Model: "claude-opus-4-7",
+		BoundUserID: &uidCopy, IsActive: true, CreatedAt: now,
+	}
+
 	// 2) Six pure-AI employees (no bound user, no IM, active).
 	//    Admin can immediately bind them to nodes for AI-auto execution.
 	addPureAI := func(idStr, role, name, avatar, prompt string, tools []string) {
@@ -176,6 +189,8 @@ func (m *memQ) seed() {
 			m.wfEmployees[wfID.String()+"|"+eid.String()] = now
 		}
 	}
+	// admin 默认在默认工作流里
+	m.wfEmployees[wfID.String()+"|"+adminEmpID.String()] = now
 }
 
 func (m *memQ) DefaultWorkspaceID() uuid.UUID {

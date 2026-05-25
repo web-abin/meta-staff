@@ -62,6 +62,7 @@ export default function RegisterPage() {
                 {t("auth.username")}
               </div>
               <input
+                type="text"
                 required
                 autoFocus
                 value={username}
