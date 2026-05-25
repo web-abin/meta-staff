@@ -105,76 +105,12 @@ func (m *memQ) seed() {
 		"你是运营 AI。\n- 输入：业务侧诉求 / 活动需求 / 数据异常线索\n- 输出：背景、目标用户、关键指标、活动机制（若有）、风险、依赖\n- 风格：以业务效果驱动；先讲为什么，再讲怎么做；输出 markdown。",
 		[]string{"search-skill"})
 
-	// 3) Six real-human seed employees (each bound to a seed user with mock
-	//    feishu IM). These keep the smoke-test signoff working and serve as
-	//    a demo for the "AI 起稿 + IM 确认" flow.
-	addHuman := func(empIDStr, userIDStr, role, name, avatar, prompt, userName, userEmail, userRole, feishuOpenID string) {
-		uid := uuid.MustParse(userIDStr)
-		// username = part-before-@ of email so seed users can log in with username + password.
-		username := userEmail
-		if i := strings.Index(userEmail, "@"); i > 0 {
-			username = userEmail[:i]
-		}
-		m.users[uid] = model.User{
-			ID: uid, WorkspaceID: wsID, Name: userName, Email: userEmail,
-			Username: &username, Password: "1234",
-			Role: userRole, CreatedAt: now,
-		}
-		eid := uuid.MustParse(empIDStr)
-		av := avatar
-		prov := "feishu"
-		ext := feishuOpenID
-		handle := "@" + userName
-		raw, _ := json.Marshal([]string{"search-skill"})
-		m.employees[eid] = model.Employee{
-			ID: eid, WorkspaceID: wsID, Role: role, Name: name,
-			Avatar: &av, SystemPrompt: prompt, Tools: raw,
-			Model: "claude-opus-4-7",
-			BoundUserID: &uid, IMProvider: &prov, IMExternalID: &ext, IMHandle: &handle,
-			IsActive: true, CreatedAt: now,
-		}
-	}
-	addHuman(
-		"22222222-2222-2222-2222-2222222222a1", "11111111-1111-1111-1111-111111111101",
-		"pm", "产品助手", "产",
-		"你代表真实产品经理 · 审阅 AI 草稿，把控验收标准。",
-		"产品负责人", "pm@meta-staff.local", "pm", "ou_pm_seed",
-	)
-	addHuman(
-		"22222222-2222-2222-2222-2222222222a2", "11111111-1111-1111-1111-111111111102",
-		"qa", "测试助手", "测",
-		"你代表真实测试 · 审阅 AI 用例草稿，确保覆盖完整。",
-		"测试负责人", "qa@meta-staff.local", "qa", "ou_qa_seed",
-	)
-	addHuman(
-		"22222222-2222-2222-2222-2222222222a3", "11111111-1111-1111-1111-111111111103",
-		"dev", "开发助手", "开",
-		"你代表真实开发 · 审阅 AI 编码结果，把控代码质量。",
-		"开发负责人", "dev@meta-staff.local", "dev", "ou_dev_seed",
-	)
-	addHuman(
-		"22222222-2222-2222-2222-2222222222a4", "11111111-1111-1111-1111-111111111104",
-		"cs", "客服助手", "客",
-		"你代表真实客服 · 整理用户反馈，转化为可处理的需求。",
-		"客服小张", "cs@meta-staff.local", "cs", "ou_cs_seed",
-	)
-	addHuman(
-		"22222222-2222-2222-2222-2222222222a5", "11111111-1111-1111-1111-111111111105",
-		"ops", "运维助手", "运",
-		"你代表真实运维 · 审阅部署计划，确保线上稳定。",
-		"运维老李", "ops@meta-staff.local", "ops", "ou_ops_seed",
-	)
-	addHuman(
-		"22222222-2222-2222-2222-2222222222a6", "11111111-1111-1111-1111-111111111106",
-		"growth", "运营助手", "营",
-		"你代表真实运营 · 整理业务诉求，关注指标与机制。",
-		"运营小苓", "growth@meta-staff.local", "growth", "ou_growth_seed",
-	)
+	// 3) 默认工作流不预绑真人员工 —— 管理员注册真人后，自己用"+ 新建员工"
+	//    的"人类员工"模式按员工 ID 加进来。
 
-	// 4) Default workflow. Nodes use the new `assignee_employee_ids` model.
-	//    intake binds 3 intake-eligible real humans (any-one-submits).
-	//    AI nodes bind pure-AI employees. Human gates bind the matching real-human.
-	//    signoff = 3-way 会签 across PM/QA/DEV real humans.
+	// 4) Default workflow. Nodes use `assignee_employee_ids`. 入口 + 人工审核
+	//    节点的 assignee_employee_ids 留空，等管理员手动绑定；AI 节点绑对应
+	//    数字员工。
 	wfID := uuid.MustParse("33333333-3333-3333-3333-333333333301")
 	desc := "产品/客服/运营提单 → AI 协作 → 三方会签 → 上线推送"
 	m.workflows[wfID] = model.Workflow{
@@ -185,21 +121,21 @@ func (m *memQ) seed() {
 	dag := `{
   "nodes": [
     {"key": "intake",  "title": "收单",         "produces": "raw",            "is_intake": true,
-     "assignee_employee_ids": ["22222222-2222-2222-2222-2222222222a4","22222222-2222-2222-2222-2222222222a1","22222222-2222-2222-2222-2222222222a6"]},
+     "assignee_employee_ids": []},
     {"key": "triage",  "title": "AI 分析分类",  "produces": "classification",
      "assignee_employee_ids": ["22222222-2222-2222-2222-222222222201"]},
     {"key": "spec",    "title": "AI 整理 PRD",  "produces": "prd",
      "assignee_employee_ids": ["22222222-2222-2222-2222-222222222201"]},
     {"key": "review",  "title": "PRD 校对",     "produces": "prd",
-     "assignee_employee_ids": ["22222222-2222-2222-2222-2222222222a1"]},
+     "assignee_employee_ids": []},
     {"key": "cases",   "title": "AI 生成用例",  "produces": "testcases",
      "assignee_employee_ids": ["22222222-2222-2222-2222-222222222202"]},
     {"key": "audit",   "title": "测试用例校对", "produces": "testcases",
-     "assignee_employee_ids": ["22222222-2222-2222-2222-2222222222a2"]},
+     "assignee_employee_ids": []},
     {"key": "build",   "title": "AI 编码",      "produces": "build",
      "assignee_employee_ids": ["22222222-2222-2222-2222-222222222203"]},
     {"key": "signoff", "title": "三方会签",     "produces": "vote",
-     "assignee_employee_ids": ["22222222-2222-2222-2222-2222222222a1","22222222-2222-2222-2222-2222222222a2","22222222-2222-2222-2222-2222222222a3"]},
+     "assignee_employee_ids": []},
     {"key": "deploy",  "title": "AI 上线",      "produces": "deploy",
      "assignee_employee_ids": ["22222222-2222-2222-2222-222222222204"]},
     {"key": "accept",  "title": "推送验收",     "produces": "notice",

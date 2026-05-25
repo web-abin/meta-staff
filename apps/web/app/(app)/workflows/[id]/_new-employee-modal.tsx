@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { api } from "../../../../lib/api";
 import { useT, type MsgKey } from "../../../../lib/i18n";
-import type { Employee, User } from "../../../../lib/types";
+import type { Employee } from "../../../../lib/types";
 
 interface EmployeeType {
   key: string;
@@ -101,25 +101,11 @@ export function NewEmployeeModal({
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState(TYPES[0].defaultPrompt);
 
-  // human state
-  const [userID, setUserID] = useState("");
-  const [users, setUsers] = useState<User[]>([]);
-  const [usersLoading, setUsersLoading] = useState(false);
-  const [humanName, setHumanName] = useState("");
-  const [humanAvatar, setHumanAvatar] = useState("");
+  // human state — 直接绑定一个已存在的员工 ID
+  const [employeeID, setEmployeeID] = useState("");
 
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (kind !== "human" || users.length > 0) return;
-    setUsersLoading(true);
-    api
-      .users()
-      .then((list) => setUsers(list))
-      .catch(() => undefined)
-      .finally(() => setUsersLoading(false));
-  }, [kind, users.length]);
 
   function pickType(et: EmployeeType) {
     setType(et);
@@ -131,20 +117,14 @@ export function NewEmployeeModal({
     setBusy(true);
     setErr(null);
     try {
-      let createdID: string;
       if (kind === "human") {
-        if (!userID.trim()) {
-          setErr(t("new_emp.user_required"));
+        const id = employeeID.trim();
+        if (!id) {
+          setErr(t("new_emp.emp_id_required"));
           setBusy(false);
           return;
         }
-        const emp = await api.createEmployee({
-          kind: "human",
-          user_id: userID.trim(),
-          name: humanName.trim() || undefined,
-          avatar: humanAvatar.trim() || undefined,
-        });
-        createdID = emp.id;
+        await api.addWorkflowEmployee(workflowID, id);
       } else {
         const finalName = name.trim() || defaultName;
         const emp = await api.createEmployee({
@@ -155,13 +135,11 @@ export function NewEmployeeModal({
           system_prompt: prompt,
           tools: [],
         });
-        createdID = emp.id;
-      }
-      // 绑定到当前工作流
-      try {
-        await api.addWorkflowEmployee(workflowID, createdID);
-      } catch {
-        // 失败也不阻断创建本身——后续可以手动加。
+        try {
+          await api.addWorkflowEmployee(workflowID, emp.id);
+        } catch {
+          /* 创建本身成功就算 OK */
+        }
       }
       onCreated();
     } catch (e) {
@@ -281,84 +259,20 @@ export function NewEmployeeModal({
           )}
 
           {kind === "human" && (
-            <>
-              <div>
-                <div className="text-[13px] mb-1.5" style={{ color: "var(--text-2)" }}>
-                  {t("new_emp.user_id")}
-                </div>
-                <input
-                  value={userID}
-                  onChange={(e) => setUserID(e.target.value)}
-                  placeholder={t("new_emp.user_id_placeholder")}
-                />
-                <div className="text-[11px] mt-1" style={{ color: "var(--text-3)" }}>
-                  {t("new_emp.user_id_hint")}
-                </div>
+            <div>
+              <div className="text-[13px] mb-1.5" style={{ color: "var(--text-2)" }}>
+                {t("new_emp.emp_id")}
               </div>
-
-              {usersLoading ? (
-                <div className="text-[12px]" style={{ color: "var(--text-3)" }}>
-                  {t("common.loading")}
-                </div>
-              ) : users.length > 0 ? (
-                <div>
-                  <div className="text-[12px] mb-1.5" style={{ color: "var(--text-3)" }}>
-                    {t("new_emp.user_pick_existing")}
-                  </div>
-                  <div className="grid grid-cols-2 gap-1 max-h-[180px] overflow-y-auto">
-                    {users.map((u) => {
-                      const on = u.id === userID;
-                      return (
-                        <button
-                          type="button"
-                          key={u.id}
-                          onClick={() => {
-                            setUserID(u.id);
-                            if (!humanName) setHumanName(u.name);
-                          }}
-                          className="px-2 py-1.5 rounded text-left text-[12px]"
-                          style={{
-                            border: `1px solid ${on ? "var(--primary)" : "var(--border)"}`,
-                            background: on ? "var(--primary-soft)" : "var(--surface)",
-                          }}
-                        >
-                          <div className="truncate font-medium">{u.name}</div>
-                          <div
-                            className="truncate text-[11px] font-mono"
-                            style={{ color: "var(--text-3)" }}
-                          >
-                            {u.username || u.email}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
-
-              <label className="block">
-                <div className="text-[13px] mb-1.5" style={{ color: "var(--text-2)" }}>
-                  {t("new_emp.display_name")}
-                </div>
-                <input
-                  value={humanName}
-                  onChange={(e) => setHumanName(e.target.value)}
-                  placeholder={t("new_emp.display_name_placeholder")}
-                />
-              </label>
-
-              <label className="block">
-                <div className="text-[13px] mb-1.5" style={{ color: "var(--text-2)" }}>
-                  {t("new_emp.avatar")}
-                </div>
-                <input
-                  value={humanAvatar}
-                  onChange={(e) => setHumanAvatar(e.target.value)}
-                  placeholder="人"
-                  maxLength={2}
-                />
-              </label>
-            </>
+              <input
+                value={employeeID}
+                onChange={(e) => setEmployeeID(e.target.value)}
+                placeholder={t("new_emp.emp_id_placeholder")}
+                autoFocus
+              />
+              <div className="text-[11px] mt-1.5" style={{ color: "var(--text-3)" }}>
+                {t("new_emp.emp_id_hint")}
+              </div>
+            </div>
           )}
 
           {err && (
@@ -376,7 +290,7 @@ export function NewEmployeeModal({
             {t("common.cancel")}
           </button>
           <button type="submit" disabled={busy} className="btn btn-primary">
-            {busy ? "…" : t("common.create")}
+            {busy ? "…" : kind === "human" ? t("new_emp.add_to_workflow") : t("common.create")}
           </button>
         </div>
       </form>

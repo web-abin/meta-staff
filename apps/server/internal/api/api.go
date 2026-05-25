@@ -813,6 +813,7 @@ type wfEmployeeBody struct {
 }
 
 // addWorkflowEmployee 把员工加入工作流。仅 admin 可调用。
+// 校验员工存在，错误 ID 会给出 404 而不是默默写一个孤儿绑定。
 func (d Deps) addWorkflowEmployee(w http.ResponseWriter, r *http.Request) {
 	if err := d.adminOnly(r); err != nil {
 		writeErr(w, 403, err)
@@ -833,7 +834,12 @@ func (d Deps) addWorkflowEmployee(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, errors.New("invalid employee_id"))
 		return
 	}
-	if err := d.Store.Q().AddWorkflowEmployee(r.Context(), wfID, empID); err != nil {
+	q := d.Store.Q()
+	if _, err := q.GetEmployee(r.Context(), empID); err != nil {
+		writeErr(w, 404, errors.New("employee not found"))
+		return
+	}
+	if err := q.AddWorkflowEmployee(r.Context(), wfID, empID); err != nil {
 		writeErr(w, 500, err)
 		return
 	}
