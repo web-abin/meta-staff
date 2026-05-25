@@ -202,3 +202,94 @@ ssh-keygen -t ed25519 -C "1872495742@qq.com"
 
 
 ssh-keygen -t ed25519 -C "abc@163.com"
+
+## 重新部署
+
+> 本地改完代码 → `git push` → ssh 到 `49.233.191.112` → 跑下面任一方案。
+
+### 方案 A：一键脚本（推荐 · 首次创建后每次只跑一条命令）
+
+**首次只做一次** — ssh 上服务器后，用 vim 创建脚本：
+
+```bash
+vim /root/redeploy.sh
+```
+
+按 `i` 进入插入模式，粘贴下面整段（vim 不会处理粘贴缩进，避免之前终端拆行的坑）：
+
+```bash
+#!/bin/bash
+set -e
+cd ~/meta-staff
+echo "[1/5] git pull"
+git pull
+echo "[2/5] pnpm install"
+pnpm install --prefer-offline
+echo "[3/5] kill old tmux"
+tmux kill-session -t ms-be 2>/dev/null || true
+tmux kill-session -t ms-fe 2>/dev/null || true
+tmux kill-session -t metastaff 2>/dev/null || true
+echo "[4/5] start tmux: metastaff"
+tmux new -d -s metastaff 'cd ~/meta-staff && make demo 2>&1 | tee /tmp/metastaff.log'
+echo "[5/5] wait 20s and verify..."
+sleep 20
+echo "--- llm provider ---"
+grep -E 'llm provider|listening' /tmp/metastaff.log | tail -5
+echo "--- ports ---"
+ss -tlnp 2>/dev/null | grep -E ':3000|:8080'
+echo "--- healthz ---"
+curl -sS -m 3 http://127.0.0.1:8080/api/healthz
+echo
+echo "done. http://49.233.191.112:3000/"
+```
+
+`Esc` → `:wq` 保存。`chmod +x /root/redeploy.sh` 一次。
+
+**以后每次部署只跑一条**：
+
+```bash
+bash /root/redeploy.sh
+```
+
+### 方案 B：纯前端改动（更快 · 不重启 server）
+
+只改了 `apps/web/` 下的文件，且 `pnpm-lock.yaml` 没动 → 只用重启 web，跳过 go build：
+
+```bash
+cd ~/meta-staff && git pull && tmux kill-session -t ms-fe 2>/dev/null; tmux new -d -s ms-fe 'cd ~/meta-staff/apps/web && pnpm dev'
+```
+
+### 方案 C：纯后端改动
+
+```bash
+cd ~/meta-staff && git pull && tmux kill-session -t ms-be 2>/dev/null; tmux new -d -s ms-be 'cd ~/meta-staff/apps/server && go run -buildvcs=false ./cmd/server'
+sleep 5 && tmux capture-pane -t ms-be -p | tail -10
+```
+
+### 看日志 / 排错
+
+```bash
+# 实时看后端日志（Ctrl+B 然后 D 退出但不杀进程）
+tmux attach -t metastaff           # 方案 A 起的合并 session
+tmux attach -t ms-be               # 方案 C 起的纯后端 session
+
+# 一次性抓最近 50 行
+tmux capture-pane -t metastaff -p | tail -50
+
+# 看 hermes 容器日志
+docker logs -f --tail 30 hermes
+
+# 看 LLM provider 是不是接到 hermes
+grep 'llm provider' /tmp/metastaff.log
+
+# 端口占用 / 进程
+ss -tlnp | grep -E ':3000|:8080|:8642'
+```
+
+### 完全重启大招（出问题就跑这个）
+
+```bash
+tmux kill-server 2>/dev/null
+docker restart hermes
+bash /root/redeploy.sh
+```
