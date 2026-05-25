@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/meta-staff/server/internal/config"
+	"github.com/meta-staff/server/internal/llm"
 	"github.com/meta-staff/server/internal/model"
 	"github.com/meta-staff/server/internal/sandbox"
 	"github.com/meta-staff/server/internal/store"
@@ -29,6 +30,7 @@ type Deps struct {
 	Engine  *workflow.Engine
 	Hub     *ws.Hub
 	Sandbox *sandbox.Sandbox
+	LLM     llm.Provider
 }
 
 func Router(d Deps) http.Handler {
@@ -90,8 +92,34 @@ func Router(d Deps) http.Handler {
 
 		api.Get("/preview/{taskID}", d.preview)
 		api.Post("/uploads", d.upload)
+
+		// Admin-only debug: 直连 LLM (走 hermes) + 落盘 HTML 到 sandbox。
+		api.Post("/debug/llm-chat", d.debugLLMChat)
+		api.Post("/debug/save-html", d.debugSaveHTML)
 	})
 	return r
+}
+
+// adminOnly 从 X-User-Id 查 user，role!=admin 返回 403。
+func (d Deps) adminOnly(r *http.Request) error {
+	uid := currentUserID(r)
+	if uid == nil {
+		return errors.New("X-User-Id required")
+	}
+	q := d.Store.Q()
+	users, err := q.ListUsers(r.Context(), q.DefaultWorkspaceID())
+	if err != nil {
+		return err
+	}
+	for _, u := range users {
+		if u.ID == *uid {
+			if u.Role != "admin" {
+				return errors.New("admin only")
+			}
+			return nil
+		}
+	}
+	return errors.New("user not found")
 }
 
 // ---------- helpers ----------
@@ -1047,4 +1075,107 @@ func classifyMIME(mime, ext string) string {
 		return "video"
 	}
 	return "doc"
+}
+
+// ---- Admin debug: 直连 hermes + 落盘 HTML ----
+
+type debugChatBody struct {
+	Prompt string `json:"prompt"`
+	System string `json:"system,omitempty"`
+}
+
+// debugLLMChat 同步调一次 LLM (Default()=hermes 优先)。hermes 服务端会跑
+// 完整 agent loop 然后返回最终文本。耗时可能从几秒到几十秒不等，超时由 LLM
+// provider 内部 http client 控制（hermes provider 默认 600s）。
+func (d Deps) debugLLMChat(w http.ResponseWriter, r *http.Request) {
+	if err := d.adminOnly(r); err != nil {
+		writeErr(w, 403, err)
+		return
+	}
+	var b debugChatBody
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	if strings.TrimSpace(b.Prompt) == "" {
+		writeErr(w, 400, errors.New("prompt required"))
+		return
+	}
+	if d.LLM == nil {
+		writeErr(w, 500, errors.New("llm provider not configured"))
+		return
+	}
+	start := time.Now()
+	out, err := d.LLM.Complete(r.Context(), llm.Request{
+		System:   b.System,
+		Messages: []llm.Message{{Role: "user", Content: b.Prompt}},
+	})
+	took := time.Since(start).Milliseconds()
+	if err != nil {
+		writeJSON(w, 200, map[string]any{
+			"provider": d.LLM.Name(),
+			"took_ms":  took,
+			"error":    err.Error(),
+		})
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"provider": d.LLM.Name(),
+		"took_ms":  took,
+		"text":     out,
+	})
+}
+
+type debugSaveBody struct {
+	Name string `json:"name"` // e.g. "snake.html"; basename only, slashes rejected
+	HTML string `json:"html"`
+}
+
+// debugSaveHTML 把任意 HTML 落到 sandbox.RuntimeDir/uploads/<name>，通过已有
+// /static/* 静态托管暴露成可浏览 URL。基本卫生：name 不能含 / 或 ..。
+func (d Deps) debugSaveHTML(w http.ResponseWriter, r *http.Request) {
+	if err := d.adminOnly(r); err != nil {
+		writeErr(w, 403, err)
+		return
+	}
+	if d.Sandbox == nil {
+		writeErr(w, 500, errors.New("sandbox not configured"))
+		return
+	}
+	var b debugSaveBody
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	name := strings.TrimSpace(b.Name)
+	if name == "" {
+		name = "debug.html"
+	}
+	if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
+		writeErr(w, 400, errors.New("name must be a plain filename, no slashes"))
+		return
+	}
+	if !strings.HasSuffix(strings.ToLower(name), ".html") {
+		name += ".html"
+	}
+	if strings.TrimSpace(b.HTML) == "" {
+		writeErr(w, 400, errors.New("html required"))
+		return
+	}
+	dir := filepath.Join(d.Sandbox.RuntimeDir, "uploads")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	full := filepath.Join(dir, name)
+	if err := os.WriteFile(full, []byte(b.HTML), 0o644); err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 201, map[string]any{
+		"url":  "/static/uploads/" + name,
+		"path": full,
+		"name": name,
+		"size": len(b.HTML),
+	})
 }

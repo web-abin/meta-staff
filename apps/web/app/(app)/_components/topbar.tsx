@@ -63,7 +63,10 @@ export function Topbar() {
 
       <nav className="flex items-center gap-1">
         {admin ? (
-          <NavItem href="/workflows">{t("wb.title")}</NavItem>
+          <>
+            <NavItem href="/workflows">{t("wb.title")}</NavItem>
+            <NavItem href="/debug">{t("header.debug")}</NavItem>
+          </>
         ) : (
           <NavItem href="/projects">{t("header.projects")}</NavItem>
         )}

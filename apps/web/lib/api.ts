@@ -162,6 +162,18 @@ export const api = {
   messages: () => listRequest<Message>("/messages"),
   markRead: (id: string) =>
     request<{ ok: true }>(`/messages/${id}/read`, { method: "POST" }),
+
+  // Admin-only debug: 直连 hermes + 落盘 HTML
+  debugLLMChat: (body: { prompt: string; system?: string }) =>
+    request<{ provider: string; took_ms: number; text?: string; error?: string }>(
+      "/debug/llm-chat",
+      { method: "POST", json: body }
+    ),
+  debugSaveHTML: (body: { name: string; html: string }) =>
+    request<{ url: string; path: string; name: string; size: number }>(
+      "/debug/save-html",
+      { method: "POST", json: body }
+    ),
 };
 
 export function setActiveUserId(id: string | null) {

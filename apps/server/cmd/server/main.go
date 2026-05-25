@@ -59,6 +59,7 @@ func main() {
 		Engine:  engine,
 		Hub:     hub,
 		Sandbox: sb,
+		LLM:     provider,
 	})
 
 	srv := &http.Server{
