@@ -217,11 +217,13 @@ const M = {
   "wf.detail.add_node": { zh: "添加节点", en: "Add node" },
 
   // Employee roster (admin sidebar)
-  "roster.title": { zh: "数字员工类型", en: "Employee types" },
+  "roster.title": { zh: "员工列表", en: "Employees" },
   "roster.create": { zh: "新建员工", en: "New employee" },
-  "roster.empty": { zh: "暂无员工，点上方按钮创建", en: "No employees yet" },
+  "roster.empty": { zh: "暂无员工，点上方按钮加入", en: "No employees yet" },
   "roster.drag_hint": { zh: "拖到画布生成实例", en: "Drag to canvas to create an instance" },
   "roster.edit": { zh: "编辑", en: "Edit" },
+  "roster.remove": { zh: "从工作流移除", en: "Remove from workflow" },
+  "roster.remove_confirm": { zh: "从这个工作流移除该员工？只是解绑，不会删除员工本身。", en: "Remove this employee from the workflow? Unbind only — the employee record remains." },
 
   // Edit employee modal
   "edit_emp.title": { zh: "编辑员工类型", en: "Edit employee type" },
