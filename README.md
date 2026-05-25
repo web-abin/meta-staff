@@ -267,3 +267,11 @@ tmux kill-server 2>/dev/null
 docker restart hermes
 cd ~/meta-staff && bash scripts/redeploy.sh
 ```
+
+### Hermes 容器要重新挂载（如 /workspace 目录变了 / 工具配置变了）
+
+仓库脚本 [`scripts/hermes-restart.sh`](scripts/hermes-restart.sh)：自动从 `.env` 读 `HERMES_API_KEY`、`docker rm -f hermes` 再带 `/root/hermes-workspace:/workspace` 重启。
+
+```bash
+cd ~/meta-staff && git pull && bash scripts/hermes-restart.sh
+```
