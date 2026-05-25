@@ -36,6 +36,32 @@ echo "▶ api key    = ${KEY:0:8}...${KEY: -4}"
 
 mkdir -p "$HERMES_WORKSPACE_DIR"
 
+# 2. 镜像不在本地就按部署文档拉一次 + tag。先走 daemon.json 配的镜像加速
+#    （默认）；走原仓库失败再依次尝试几个国内 mirror。
+ensure_image() {
+  if [ -n "$(docker images -q "$HERMES_IMAGE" 2>/dev/null)" ]; then
+    return 0
+  fi
+  echo "▶ image missing, pulling..."
+  local sources=(
+    "nousresearch/hermes-agent:latest"
+    "docker.1ms.run/nousresearch/hermes-agent:latest"
+    "hub.rat.dev/nousresearch/hermes-agent:latest"
+    "docker.m.daocloud.io/nousresearch/hermes-agent:latest"
+  )
+  for src in "${sources[@]}"; do
+    echo "  → trying $src"
+    if docker pull "$src"; then
+      docker tag "$src" "$HERMES_IMAGE"
+      echo "  ✓ tagged $src as $HERMES_IMAGE"
+      return 0
+    fi
+  done
+  echo "❌ 所有源都拉不动。手动跑：docker pull nousresearch/hermes-agent:latest && docker tag nousresearch/hermes-agent:latest $HERMES_IMAGE"
+  return 1
+}
+ensure_image
+
 echo "▶ removing old container (if any)..."
 docker rm -f hermes 2>/dev/null || true
 
