@@ -38,7 +38,9 @@ func Router(d Deps) http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
+	// 默认 60s 超时对快速 REST 路由够用，但 hermes agent loop 单次可能
+	// 几十秒到几分钟，所以下方 /api/debug/* 路由跳过这个 middleware，
+	// 走 LLM provider 自己的 http client timeout（hermes provider = 600s）。
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:3000", "http://localhost:3001"},
 		AllowedMethods:   []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
