@@ -35,6 +35,11 @@ echo "▶ image      = $HERMES_IMAGE"
 echo "▶ api key    = ${KEY:0:8}...${KEY: -4}"
 
 mkdir -p "$HERMES_WORKSPACE_DIR"
+# hermes 容器里跑的是非 root 用户（日志会打 "Dropping root privileges"），
+# 而宿主机 mkdir 出来的目录是 root:root 0755 — 容器内非 root 用户写不进。
+# 整个目录 chmod 777：方案简单，容器内文件创建后宿主机也能直接读写。
+# 副作用：宿主机其他用户也能写。考虑到这个目录就是给 hermes 当沙箱，可接受。
+chmod 777 "$HERMES_WORKSPACE_DIR"
 
 # 2. 镜像不在本地就按部署文档拉一次 + tag。先走 daemon.json 配的镜像加速
 #    （默认）；走原仓库失败再依次尝试几个国内 mirror。
