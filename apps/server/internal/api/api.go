@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -96,7 +98,10 @@ func Router(d Deps) http.Handler {
 		api.Post("/uploads", d.upload)
 
 		// Admin-only debug: 直连 LLM (走 hermes) + 落盘 HTML 到 sandbox。
+		// llm-chat 走异步 job 模式：POST 立刻返回 job_id，前端轮询 GET 取结果，
+		// 避免 Next dev proxy / 任何中间层 ~30s 超时切连接。
 		api.Post("/debug/llm-chat", d.debugLLMChat)
+		api.Get("/debug/llm-chat/{id}", d.debugLLMChatJob)
 		api.Post("/debug/save-html", d.debugSaveHTML)
 	})
 	return r
@@ -1086,9 +1091,24 @@ type debugChatBody struct {
 	System string `json:"system,omitempty"`
 }
 
-// debugLLMChat 同步调一次 LLM (Default()=hermes 优先)。hermes 服务端会跑
-// 完整 agent loop 然后返回最终文本。耗时可能从几秒到几十秒不等，超时由 LLM
-// provider 内部 http client 控制（hermes provider 默认 600s）。
+// debugJob 后台运行的 LLM 调用结果。
+type debugJob struct {
+	ID        string    `json:"id"`
+	Status    string    `json:"status"` // running | done | error
+	Provider  string    `json:"provider,omitempty"`
+	Text      string    `json:"text,omitempty"`
+	Error     string    `json:"error,omitempty"`
+	StartedAt time.Time `json:"started_at"`
+	TookMS    int64     `json:"took_ms,omitempty"`
+}
+
+var (
+	debugJobsMu sync.Mutex
+	debugJobs   = map[string]*debugJob{}
+)
+
+// debugLLMChat 启一个后台 goroutine 调 LLM (Default()=hermes)，立刻返回 job_id。
+// hermes agent loop 经常 30s+，超过 Next dev proxy 默认超时，因此走异步。
 func (d Deps) debugLLMChat(w http.ResponseWriter, r *http.Request) {
 	if err := d.adminOnly(r); err != nil {
 		writeErr(w, 403, err)
@@ -1107,25 +1127,53 @@ func (d Deps) debugLLMChat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, errors.New("llm provider not configured"))
 		return
 	}
-	start := time.Now()
-	out, err := d.LLM.Complete(r.Context(), llm.Request{
-		System:   b.System,
-		Messages: []llm.Message{{Role: "user", Content: b.Prompt}},
-	})
-	took := time.Since(start).Milliseconds()
-	if err != nil {
-		writeJSON(w, 200, map[string]any{
-			"provider": d.LLM.Name(),
-			"took_ms":  took,
-			"error":    err.Error(),
+	id := uuid.New().String()
+	job := &debugJob{ID: id, Status: "running", Provider: d.LLM.Name(), StartedAt: time.Now()}
+	debugJobsMu.Lock()
+	debugJobs[id] = job
+	debugJobsMu.Unlock()
+
+	system := b.System
+	prompt := b.Prompt
+	provider := d.LLM
+	go func() {
+		// 不绑 r.Context()，请求早就返回了。用 background + 10 分钟硬上限。
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		out, err := provider.Complete(ctx, llm.Request{
+			System:   system,
+			Messages: []llm.Message{{Role: "user", Content: prompt}},
 		})
+		debugJobsMu.Lock()
+		defer debugJobsMu.Unlock()
+		job.TookMS = time.Since(job.StartedAt).Milliseconds()
+		if err != nil {
+			job.Status = "error"
+			job.Error = err.Error()
+			return
+		}
+		job.Status = "done"
+		job.Text = out
+	}()
+
+	writeJSON(w, 202, map[string]any{"job_id": id, "status": "running"})
+}
+
+// debugLLMChatJob 查询 job 状态/结果。前端每隔 2s 轮询一次直到 status != running。
+func (d Deps) debugLLMChatJob(w http.ResponseWriter, r *http.Request) {
+	if err := d.adminOnly(r); err != nil {
+		writeErr(w, 403, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{
-		"provider": d.LLM.Name(),
-		"took_ms":  took,
-		"text":     out,
-	})
+	id := chi.URLParam(r, "id")
+	debugJobsMu.Lock()
+	job, ok := debugJobs[id]
+	debugJobsMu.Unlock()
+	if !ok {
+		writeErr(w, 404, errors.New("job not found"))
+		return
+	}
+	writeJSON(w, 200, job)
 }
 
 type debugSaveBody struct {

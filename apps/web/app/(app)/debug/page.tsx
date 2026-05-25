@@ -20,6 +20,7 @@ export default function DebugPage() {
     "你是一个资深前端工程师，输出干净自包含的 HTML。"
   );
   const [busy, setBusy] = useState(false);
+  const [elapsed, setElapsed] = useState(0); // seconds, while polling
   const [result, setResult] = useState<{
     provider: string;
     took_ms: number;
@@ -49,12 +50,43 @@ export default function DebugPage() {
     setResult(null);
     setSaved(null);
     setSaveErr(null);
+    setElapsed(0);
+    const startedAt = Date.now();
+    const tickTimer = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
     try {
-      const r = await api.debugLLMChat({ prompt, system: system.trim() || undefined });
-      setResult(r);
+      const { job_id } = await api.debugLLMChatStart({
+        prompt,
+        system: system.trim() || undefined,
+      });
+      // 轮询：每 2s 一次，最多 10 分钟（与后端硬上限一致）
+      const deadline = Date.now() + 10 * 60 * 1000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const j = await api.debugLLMChatJob(job_id);
+        if (j.status === "done") {
+          setResult({
+            provider: j.provider ?? "?",
+            took_ms: j.took_ms ?? 0,
+            text: j.text,
+          });
+          return;
+        }
+        if (j.status === "error") {
+          setResult({
+            provider: j.provider ?? "?",
+            took_ms: j.took_ms ?? 0,
+            error: j.error,
+          });
+          return;
+        }
+      }
+      setResult({ provider: "?", took_ms: 0, error: "timeout waiting for job" });
     } catch (e) {
       setResult({ provider: "?", took_ms: 0, error: String((e as Error).message ?? e) });
     } finally {
+      clearInterval(tickTimer);
       setBusy(false);
     }
   }
@@ -116,7 +148,7 @@ export default function DebugPage() {
             disabled={busy || !prompt.trim()}
             className="btn btn-primary"
           >
-            {busy ? t("debug.sending") : t("debug.send")}
+            {busy ? `${t("debug.sending")} (${elapsed}s)` : t("debug.send")}
           </button>
           {result && (
             <button

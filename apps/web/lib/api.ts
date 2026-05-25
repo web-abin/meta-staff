@@ -164,11 +164,21 @@ export const api = {
     request<{ ok: true }>(`/messages/${id}/read`, { method: "POST" }),
 
   // Admin-only debug: 直连 hermes + 落盘 HTML
-  debugLLMChat: (body: { prompt: string; system?: string }) =>
-    request<{ provider: string; took_ms: number; text?: string; error?: string }>(
-      "/debug/llm-chat",
-      { method: "POST", json: body }
-    ),
+  // chat 走异步 job 模式：POST 立刻拿 job_id，前端轮询 GET 取结果。
+  debugLLMChatStart: (body: { prompt: string; system?: string }) =>
+    request<{ job_id: string; status: "running" }>("/debug/llm-chat", {
+      method: "POST",
+      json: body,
+    }),
+  debugLLMChatJob: (jobID: string) =>
+    request<{
+      id: string;
+      status: "running" | "done" | "error";
+      provider?: string;
+      text?: string;
+      error?: string;
+      took_ms?: number;
+    }>(`/debug/llm-chat/${jobID}`),
   debugSaveHTML: (body: { name: string; html: string }) =>
     request<{ url: string; path: string; name: string; size: number }>(
       "/debug/save-html",
