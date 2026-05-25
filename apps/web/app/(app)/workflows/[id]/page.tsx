@@ -25,6 +25,7 @@ export default function WorkflowEditorPage() {
   const [, setVersion] = useState<WorkflowVersion | null>(null);
   const [draft, setDraft] = useState<DAG | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [workflowEmployeeIDs, setWorkflowEmployeeIDs] = useState<Set<string>>(new Set());
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -43,15 +44,28 @@ export default function WorkflowEditorPage() {
       if (!target) return;
       setWf(target);
       setEmployees(emps);
-      const v = await api.workflowVersion(target.id);
+      const [v, wfEmps] = await Promise.all([
+        api.workflowVersion(target.id),
+        api.workflowEmployees(target.id).catch(() => [] as Employee[]),
+      ]);
       setVersion(v);
       setDraft(v.dag);
+      setWorkflowEmployeeIDs(new Set(wfEmps.map((e) => e.id)));
     })();
   }, [ready, me, admin, wfID, router]);
 
   const reloadEmployees = useCallback(async () => {
-    setEmployees(await api.employees());
-  }, []);
+    if (!wf) {
+      setEmployees(await api.employees());
+      return;
+    }
+    const [all, wfEmps] = await Promise.all([
+      api.employees(),
+      api.workflowEmployees(wf.id).catch(() => [] as Employee[]),
+    ]);
+    setEmployees(all);
+    setWorkflowEmployeeIDs(new Set(wfEmps.map((e) => e.id)));
+  }, [wf]);
 
   const empByID = useMemo(() => {
     const m = new Map<string, Employee>();
@@ -211,7 +225,10 @@ export default function WorkflowEditorPage() {
         style={{ borderRight: "1px solid var(--border)", background: "var(--surface-2)" }}
       >
         <EmployeeRoster
-          employees={employees.filter((e) => e.is_active && !e.bound_user_id)}
+          workflowID={wf.id}
+          employees={employees.filter(
+            (e) => e.is_active && workflowEmployeeIDs.has(e.id)
+          )}
           onCreated={reloadEmployees}
         />
       </aside>
@@ -277,6 +294,7 @@ export default function WorkflowEditorPage() {
           node={selected}
           empByID={empByID}
           allEmployees={employees}
+          workflowMemberIDs={workflowEmployeeIDs}
           onPatch={patchSelected}
           onPatchInstance={patchSelectedInstance}
           onRemove={removeSelected}

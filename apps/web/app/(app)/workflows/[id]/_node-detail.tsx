@@ -10,6 +10,8 @@ interface Props {
   node: DAGNode | null;
   empByID: Map<string, Employee>;
   allEmployees: Employee[];
+  // 只显示属于当前工作流的人类员工作为候选真人助手。空集合时回退到 allEmployees。
+  workflowMemberIDs?: Set<string>;
   onPatch: (patch: Partial<DAGNode>) => void;
   onPatchInstance: (patch: Partial<DAGNodeInstance>) => void;
   onRemove: () => void;
@@ -21,6 +23,7 @@ export function NodeDetail({
   node,
   empByID,
   allEmployees,
+  workflowMemberIDs,
   onPatchInstance,
   onRemove,
   onAddHelper,
@@ -59,13 +62,14 @@ export function NodeDetail({
   const helpers = assignees.slice(1);
   const helperIds = new Set(helpers.map((e) => e.id));
 
-  // Candidate helpers = real-person employees not already on this node
+  // Candidate helpers = real-person employees, 属于当前工作流，且未在节点上
   const candidates = allEmployees.filter(
     (e) =>
       !!e.bound_user_id &&
       e.id !== typeEmp?.id &&
       !helperIds.has(e.id) &&
-      e.is_active
+      e.is_active &&
+      (!workflowMemberIDs || workflowMemberIDs.size === 0 || workflowMemberIDs.has(e.id))
   );
 
   // Effective instance values (fall back to type for legacy nodes that have

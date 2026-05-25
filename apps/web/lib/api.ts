@@ -4,6 +4,7 @@ import type {
   Employee,
   EmployeeStats,
   Message,
+  MyTaskItem,
   OnboardPayload,
   Preview,
   ProjectItem,
@@ -67,6 +68,9 @@ export const api = {
   myEmployee: () => request<Employee | null>("/me/employee"),
   myProjects: () =>
     request<{ projects: ProjectItem[] }>("/me/projects").then((r) => r.projects ?? []),
+  myTasks: () =>
+    request<{ tasks: MyTaskItem[] }>("/me/tasks").then((r) => r.tasks ?? []),
+  myWorkflows: () => listRequest<Workflow>("/me/workflows"),
   uploadFile: async (file: File) => {
     const fd = new FormData();
     fd.append("file", file);
@@ -107,13 +111,30 @@ export const api = {
   createEmployeeSkill: (id: string, summary: string) =>
     request<Skill>(`/employees/${id}/skills`, { method: "POST", json: { summary } }),
   createEmployee: (body: {
-    role: string;
-    name: string;
+    kind?: "digital" | "human";
+    role?: string;
+    name?: string;
     avatar?: string | null;
-    system_prompt: string;
+    system_prompt?: string;
     tools?: string[];
     model?: string;
+    user_id?: string;
+    im_provider?: string;
+    im_external_id?: string;
+    im_handle?: string;
   }) => request<Employee>("/employees", { method: "POST", json: body }),
+
+  workflowEmployees: (workflowID: string) =>
+    listRequest<Employee>(`/workflows/${workflowID}/employees`),
+  addWorkflowEmployee: (workflowID: string, employeeID: string) =>
+    request<{ ok: true }>(`/workflows/${workflowID}/employees`, {
+      method: "POST",
+      json: { employee_id: employeeID },
+    }),
+  removeWorkflowEmployee: (workflowID: string, employeeID: string) =>
+    request<{ ok: true }>(`/workflows/${workflowID}/employees/${employeeID}`, {
+      method: "DELETE",
+    }),
 
   workflows: () => listRequest<Workflow>("/workflows"),
   workflowVersion: (id: string) =>
@@ -128,6 +149,7 @@ export const api = {
   tasks: () => listRequest<Task>("/tasks"),
   task: (id: string) => request<TaskDetail>(`/tasks/${id}`),
   createTask: (body: {
+    workflow_id?: string;
     title: string;
     source: string;
     content: string;

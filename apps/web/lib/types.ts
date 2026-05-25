@@ -201,3 +201,11 @@ export interface ProjectItem {
   active_tasks: number;
   bound_node_keys: string[];
 }
+
+export interface MyTaskItem {
+  task: Task;
+  workflow_id: string;
+  bound_node_keys: string[];
+  at_my_node: boolean;
+  current_node_key: string;
+}

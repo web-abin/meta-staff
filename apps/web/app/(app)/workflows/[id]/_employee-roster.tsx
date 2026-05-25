@@ -10,9 +10,11 @@ import { EditEmployeeModal } from "./_edit-employee-modal";
 export const EMP_DRAG_TYPE = "application/x-meta-staff-employee";
 
 export function EmployeeRoster({
+  workflowID,
   employees,
   onCreated,
 }: {
+  workflowID: string;
   employees: Employee[];
   onCreated: () => void;
 }) {
@@ -98,6 +100,7 @@ export function EmployeeRoster({
 
       {openNew && (
         <NewEmployeeModal
+          workflowID={workflowID}
           existing={employees}
           onClose={() => setOpenNew(false)}
           onCreated={() => {

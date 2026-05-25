@@ -34,6 +34,9 @@ type memQ struct {
 
 	// secondary index for unique(node_run_id, reviewer_user_id) on reviews
 	reviewByKey map[string]uuid.UUID
+
+	// workflow_employees: key = workflowID|employeeID, value = added_at
+	wfEmployees map[string]time.Time
 }
 
 func newMemQ() *memQ {
@@ -50,6 +53,7 @@ func newMemQ() *memQ {
 		messages:    map[uuid.UUID]model.Message{},
 		skills:      map[uuid.UUID]model.Skill{},
 		reviewByKey: map[string]uuid.UUID{},
+		wfEmployees: map[string]time.Time{},
 	}
 	m.seed()
 	return m
@@ -217,6 +221,24 @@ func (m *memQ) seed() {
 	m.wfVersions[wvID] = model.WorkflowVersion{
 		ID: wvID, WorkflowID: wfID, Version: 1,
 		DAG: json.RawMessage(dag), CreatedAt: now,
+	}
+
+	// 5) 回填 workflow_employees：把 DAG 里所有 assignee_employee_ids 都登记成
+	// 默认工作流的成员（保持和 SQL 迁移 0005 一致的行为）。
+	var seeded struct {
+		Nodes []struct {
+			AssigneeEmployeeIDs []string `json:"assignee_employee_ids"`
+		} `json:"nodes"`
+	}
+	_ = json.Unmarshal([]byte(dag), &seeded)
+	for _, n := range seeded.Nodes {
+		for _, eidStr := range n.AssigneeEmployeeIDs {
+			eid, err := uuid.Parse(eidStr)
+			if err != nil {
+				continue
+			}
+			m.wfEmployees[wfID.String()+"|"+eid.String()] = now
+		}
 	}
 }
 
@@ -511,6 +533,79 @@ func (m *memQ) NewWorkflowVersion(_ context.Context, p UpsertWorkflowVersionPara
 		m.workflows[p.WorkflowID] = w
 	}
 	return v, nil
+}
+
+// ============== workflow_employees ==============
+
+func (m *memQ) ListWorkflowEmployees(_ context.Context, workflowID uuid.UUID) ([]uuid.UUID, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	prefix := workflowID.String() + "|"
+	type pair struct {
+		id uuid.UUID
+		t  time.Time
+	}
+	var pairs []pair
+	for k, t := range m.wfEmployees {
+		if !strings.HasPrefix(k, prefix) {
+			continue
+		}
+		eid, err := uuid.Parse(k[len(prefix):])
+		if err != nil {
+			continue
+		}
+		pairs = append(pairs, pair{eid, t})
+	}
+	sort.Slice(pairs, func(i, j int) bool { return pairs[i].t.Before(pairs[j].t) })
+	out := []uuid.UUID{}
+	for _, p := range pairs {
+		out = append(out, p.id)
+	}
+	return out, nil
+}
+
+func (m *memQ) ListWorkflowsByEmployee(_ context.Context, employeeID uuid.UUID) ([]uuid.UUID, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	suffix := "|" + employeeID.String()
+	type pair struct {
+		id uuid.UUID
+		t  time.Time
+	}
+	var pairs []pair
+	for k, t := range m.wfEmployees {
+		if !strings.HasSuffix(k, suffix) {
+			continue
+		}
+		wid, err := uuid.Parse(k[:len(k)-len(suffix)])
+		if err != nil {
+			continue
+		}
+		pairs = append(pairs, pair{wid, t})
+	}
+	sort.Slice(pairs, func(i, j int) bool { return pairs[i].t.Before(pairs[j].t) })
+	out := []uuid.UUID{}
+	for _, p := range pairs {
+		out = append(out, p.id)
+	}
+	return out, nil
+}
+
+func (m *memQ) AddWorkflowEmployee(_ context.Context, workflowID, employeeID uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := workflowID.String() + "|" + employeeID.String()
+	if _, ok := m.wfEmployees[key]; !ok {
+		m.wfEmployees[key] = time.Now().UTC()
+	}
+	return nil
+}
+
+func (m *memQ) RemoveWorkflowEmployee(_ context.Context, workflowID, employeeID uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.wfEmployees, workflowID.String()+"|"+employeeID.String())
+	return nil
 }
 
 // ============== tasks ==============

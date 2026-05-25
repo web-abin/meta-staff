@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { api } from "../../../../lib/api";
 import { useT, type MsgKey } from "../../../../lib/i18n";
-import type { Employee } from "../../../../lib/types";
+import type { Employee, User } from "../../../../lib/types";
 
 interface EmployeeType {
   key: string;
@@ -83,20 +83,43 @@ const TYPES: EmployeeType[] = [
 ];
 
 export function NewEmployeeModal({
+  workflowID,
   onClose,
   onCreated,
 }: {
+  workflowID: string;
   existing: Employee[];
   onClose: () => void;
   onCreated: () => void;
 }) {
   const { t } = useT();
+  const [kind, setKind] = useState<"digital" | "human">("digital");
+
+  // digital state
   const [type, setType] = useState<EmployeeType>(TYPES[0]);
   const defaultName = type.defaultName;
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState(TYPES[0].defaultPrompt);
+
+  // human state
+  const [userID, setUserID] = useState("");
+  const [users, setUsers] = useState<User[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [humanName, setHumanName] = useState("");
+  const [humanAvatar, setHumanAvatar] = useState("");
+
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (kind !== "human" || users.length > 0) return;
+    setUsersLoading(true);
+    api
+      .users()
+      .then((list) => setUsers(list))
+      .catch(() => undefined)
+      .finally(() => setUsersLoading(false));
+  }, [kind, users.length]);
 
   function pickType(et: EmployeeType) {
     setType(et);
@@ -105,17 +128,41 @@ export function NewEmployeeModal({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    const finalName = name.trim() || defaultName;
     setBusy(true);
     setErr(null);
     try {
-      await api.createEmployee({
-        role: type.role,
-        name: finalName,
-        avatar: type.avatar,
-        system_prompt: prompt,
-        tools: [],
-      });
+      let createdID: string;
+      if (kind === "human") {
+        if (!userID.trim()) {
+          setErr(t("new_emp.user_required"));
+          setBusy(false);
+          return;
+        }
+        const emp = await api.createEmployee({
+          kind: "human",
+          user_id: userID.trim(),
+          name: humanName.trim() || undefined,
+          avatar: humanAvatar.trim() || undefined,
+        });
+        createdID = emp.id;
+      } else {
+        const finalName = name.trim() || defaultName;
+        const emp = await api.createEmployee({
+          kind: "digital",
+          role: type.role,
+          name: finalName,
+          avatar: type.avatar,
+          system_prompt: prompt,
+          tools: [],
+        });
+        createdID = emp.id;
+      }
+      // 绑定到当前工作流
+      try {
+        await api.addWorkflowEmployee(workflowID, createdID);
+      } catch {
+        // 失败也不阻断创建本身——后续可以手动加。
+      }
       onCreated();
     } catch (e) {
       setErr(String((e as Error).message ?? e));
@@ -151,18 +198,19 @@ export function NewEmployeeModal({
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+          {/* 数字 / 真人 切换 */}
           <div>
             <div className="text-[13px] mb-2" style={{ color: "var(--text-2)" }}>
-              {t("new_emp.type")}
+              {t("new_emp.kind")}
             </div>
-            <div className="grid grid-cols-4 gap-2">
-              {TYPES.map((et) => {
-                const on = et.key === type.key;
+            <div className="grid grid-cols-2 gap-2">
+              {(["digital", "human"] as const).map((k) => {
+                const on = k === kind;
                 return (
                   <button
                     type="button"
-                    key={et.key}
-                    onClick={() => pickType(et)}
+                    key={k}
+                    onClick={() => setKind(k)}
                     className="px-3 py-2.5 rounded-md text-[13px] transition"
                     style={{
                       border: `1px solid ${on ? "var(--primary)" : "var(--border)"}`,
@@ -171,35 +219,147 @@ export function NewEmployeeModal({
                       fontWeight: on ? 500 : 400,
                     }}
                   >
-                    {t(et.labelKey)}
+                    {k === "digital" ? t("new_emp.kind_digital") : t("new_emp.kind_human")}
                   </button>
                 );
               })}
             </div>
           </div>
 
-          <label className="block">
-            <div className="text-[13px] mb-1.5" style={{ color: "var(--text-2)" }}>
-              {t("new_emp.name")}
-            </div>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t("new_emp.name_placeholder", { next: defaultName })}
-            />
-          </label>
+          {kind === "digital" && (
+            <>
+              <div>
+                <div className="text-[13px] mb-2" style={{ color: "var(--text-2)" }}>
+                  {t("new_emp.type")}
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                  {TYPES.map((et) => {
+                    const on = et.key === type.key;
+                    return (
+                      <button
+                        type="button"
+                        key={et.key}
+                        onClick={() => pickType(et)}
+                        className="px-3 py-2.5 rounded-md text-[13px] transition"
+                        style={{
+                          border: `1px solid ${on ? "var(--primary)" : "var(--border)"}`,
+                          background: on ? "var(--primary-soft)" : "var(--surface)",
+                          color: on ? "var(--primary)" : "var(--text)",
+                          fontWeight: on ? 500 : 400,
+                        }}
+                      >
+                        {t(et.labelKey)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
-          <label className="block">
-            <div className="text-[13px] mb-1.5" style={{ color: "var(--text-2)" }}>
-              {t("new_emp.prompt")}
-            </div>
-            <textarea
-              rows={7}
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder={t("new_emp.prompt_placeholder")}
-            />
-          </label>
+              <label className="block">
+                <div className="text-[13px] mb-1.5" style={{ color: "var(--text-2)" }}>
+                  {t("new_emp.name")}
+                </div>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={t("new_emp.name_placeholder", { next: defaultName })}
+                />
+              </label>
+
+              <label className="block">
+                <div className="text-[13px] mb-1.5" style={{ color: "var(--text-2)" }}>
+                  {t("new_emp.prompt")}
+                </div>
+                <textarea
+                  rows={7}
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder={t("new_emp.prompt_placeholder")}
+                />
+              </label>
+            </>
+          )}
+
+          {kind === "human" && (
+            <>
+              <div>
+                <div className="text-[13px] mb-1.5" style={{ color: "var(--text-2)" }}>
+                  {t("new_emp.user_id")}
+                </div>
+                <input
+                  value={userID}
+                  onChange={(e) => setUserID(e.target.value)}
+                  placeholder={t("new_emp.user_id_placeholder")}
+                />
+                <div className="text-[11px] mt-1" style={{ color: "var(--text-3)" }}>
+                  {t("new_emp.user_id_hint")}
+                </div>
+              </div>
+
+              {usersLoading ? (
+                <div className="text-[12px]" style={{ color: "var(--text-3)" }}>
+                  {t("common.loading")}
+                </div>
+              ) : users.length > 0 ? (
+                <div>
+                  <div className="text-[12px] mb-1.5" style={{ color: "var(--text-3)" }}>
+                    {t("new_emp.user_pick_existing")}
+                  </div>
+                  <div className="grid grid-cols-2 gap-1 max-h-[180px] overflow-y-auto">
+                    {users.map((u) => {
+                      const on = u.id === userID;
+                      return (
+                        <button
+                          type="button"
+                          key={u.id}
+                          onClick={() => {
+                            setUserID(u.id);
+                            if (!humanName) setHumanName(u.name);
+                          }}
+                          className="px-2 py-1.5 rounded text-left text-[12px]"
+                          style={{
+                            border: `1px solid ${on ? "var(--primary)" : "var(--border)"}`,
+                            background: on ? "var(--primary-soft)" : "var(--surface)",
+                          }}
+                        >
+                          <div className="truncate font-medium">{u.name}</div>
+                          <div
+                            className="truncate text-[11px] font-mono"
+                            style={{ color: "var(--text-3)" }}
+                          >
+                            {u.username || u.email}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              <label className="block">
+                <div className="text-[13px] mb-1.5" style={{ color: "var(--text-2)" }}>
+                  {t("new_emp.display_name")}
+                </div>
+                <input
+                  value={humanName}
+                  onChange={(e) => setHumanName(e.target.value)}
+                  placeholder={t("new_emp.display_name_placeholder")}
+                />
+              </label>
+
+              <label className="block">
+                <div className="text-[13px] mb-1.5" style={{ color: "var(--text-2)" }}>
+                  {t("new_emp.avatar")}
+                </div>
+                <input
+                  value={humanAvatar}
+                  onChange={(e) => setHumanAvatar(e.target.value)}
+                  placeholder="人"
+                  maxLength={2}
+                />
+              </label>
+            </>
+          )}
 
           {err && (
             <div className="text-[13px]" style={{ color: "var(--danger)" }}>

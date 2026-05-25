@@ -8,7 +8,7 @@ import { api } from "../../../lib/api";
 import { useT } from "../../../lib/i18n";
 import { isAdmin, useUser } from "../../../lib/user";
 import { useEvents } from "../../../lib/ws";
-import type { Employee, ProjectItem } from "../../../lib/types";
+import type { Employee, MyTaskItem } from "../../../lib/types";
 
 const FIRST_SEEN_KEY = "meta-staff:projects:first_seen";
 
@@ -16,14 +16,14 @@ export default function ProjectsPage() {
   const { t } = useT();
   const { me, ready } = useUser();
   const router = useRouter();
-  const [items, setItems] = useState<ProjectItem[]>([]);
+  const [items, setItems] = useState<MyTaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [welcome, setWelcome] = useState(false);
 
   async function refresh() {
     try {
-      setItems(await api.myProjects());
+      setItems(await api.myTasks());
     } finally {
       setLoading(false);
     }
@@ -64,9 +64,12 @@ export default function ProjectsPage() {
   if (!ready || !me) return null;
 
   return (
-    <div className="mx-auto max-w-[1200px] px-8 py-10">
-      <div>
-        <h1 className="text-[24px] font-semibold">{t("emp_wb.projects")}</h1>
+    <div className="mx-auto max-w-[1100px] px-8 py-10">
+      <div className="flex items-center justify-between">
+        <h1 className="text-[24px] font-semibold">{t("requests.title")}</h1>
+        <div className="text-[12px]" style={{ color: "var(--text-3)" }}>
+          {t("requests.count", { n: items.length })}
+        </div>
       </div>
 
       {loading ? (
@@ -78,45 +81,72 @@ export default function ProjectsPage() {
           className="mt-10 text-[14px] p-10 rounded-md text-center"
           style={{ background: "var(--bg-soft)", color: "var(--text-3)" }}
         >
-          {t("emp_wb.projects_empty")}
+          {t("requests.empty")}
         </div>
       ) : (
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <ul className="mt-8 space-y-3">
           {items.map((it) => (
-            <Link
-              key={it.workflow.id}
-              href={`/projects/${it.workflow.id}`}
-              className="card p-5 transition hover:shadow-md relative"
-              style={{ boxShadow: "var(--shadow-sm)" }}
-            >
-              <div className="flex items-center justify-between">
-                <div
-                  className="inline-flex items-center justify-center w-10 h-10 rounded-md"
-                  style={{ background: "var(--primary-soft)", color: "var(--primary)" }}
-                >
-                  <FlowIcon />
-                </div>
-                {it.has_active_task ? (
-                  <span className="badge">{it.active_tasks}</span>
-                ) : (
-                  <span className="tag">{t("emp_wb.no_task")}</span>
-                )}
-              </div>
-              <div className="mt-4 text-[16px] font-medium">{it.workflow.name}</div>
-              <div
-                className="mt-1 text-[12px]"
-                style={{ color: "var(--text-3)" }}
+            <li key={it.task.id}>
+              <Link
+                href={`/projects/${it.task.id}`}
+                className="card block p-4 transition hover:border-[var(--border-strong)] relative"
               >
-                {t("emp_wb.bound_nodes")} · {it.bound_node_keys.length}
-              </div>
-              {it.has_active_task && (
-                <div className="mt-3 text-[12px]" style={{ color: "var(--primary)" }}>
-                  {t("emp_wb.task_count", { n: it.active_tasks })}
+                {it.at_my_node && (
+                  <span
+                    className="absolute top-3 right-3 inline-block w-2.5 h-2.5 rounded-full"
+                    style={{ background: "var(--danger)" }}
+                    aria-label="待处理"
+                  />
+                )}
+                <div className="flex items-start gap-3">
+                  <span
+                    className="inline-flex items-center justify-center w-10 h-10 rounded-md shrink-0"
+                    style={{
+                      background: it.at_my_node ? "#ffe5e5" : "var(--primary-soft)",
+                      color: it.at_my_node ? "var(--danger)" : "var(--primary)",
+                    }}
+                  >
+                    <FlowIcon />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[15px] font-medium truncate">
+                      {it.task.title}
+                    </div>
+                    <div
+                      className="mt-1 text-[12px] flex items-center gap-2 flex-wrap"
+                      style={{ color: "var(--text-3)" }}
+                    >
+                      <span className="font-mono">{statusText(t, it)}</span>
+                      <span>·</span>
+                      <span>
+                        {t("requests.current_node")}: {it.current_node_key || "—"}
+                      </span>
+                      {it.bound_node_keys.length > 0 && (
+                        <>
+                          <span>·</span>
+                          <span>
+                            {t("requests.mine")}:{" "}
+                            <span className="font-mono">
+                              {it.bound_node_keys.join(", ")}
+                            </span>
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {it.at_my_node && (
+                    <span
+                      className="text-[11px] px-2 py-0.5 rounded-md shrink-0"
+                      style={{ background: "#ffe5e5", color: "var(--danger)" }}
+                    >
+                      {t("requests.your_turn")}
+                    </span>
+                  )}
                 </div>
-              )}
-            </Link>
+              </Link>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
 
       {welcome && employee && (
@@ -124,6 +154,15 @@ export default function ProjectsPage() {
       )}
     </div>
   );
+}
+
+function statusText(
+  t: (k: any, vars?: Record<string, string | number>) => string,
+  it: MyTaskItem
+): string {
+  if (it.task.status && it.task.status !== "open") return it.task.status;
+  if (it.at_my_node) return t("requests.your_turn");
+  return t("requests.running");
 }
 
 function WelcomeModal({ employeeId, onClose }: { employeeId: string; onClose: () => void }) {

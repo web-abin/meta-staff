@@ -77,6 +77,7 @@ func Router(d Deps) http.Handler {
 		api.Get("/me/employee", d.myEmployee)
 		api.Get("/me/assignments", d.myAssignments)
 		api.Get("/me/projects", d.myProjects)
+		api.Get("/me/tasks", d.myTasks)
 
 		api.Get("/employees", d.listEmployees)
 		api.Post("/employees", d.createEmployee)
@@ -90,6 +91,10 @@ func Router(d Deps) http.Handler {
 		api.Get("/workflows/{id}", d.getWorkflow)
 		api.Get("/workflows/{id}/version", d.getWorkflowActiveVersion)
 		api.Post("/workflows/{id}/versions", d.newWorkflowVersion)
+		api.Get("/workflows/{id}/employees", d.listWorkflowEmployees)
+		api.Post("/workflows/{id}/employees", d.addWorkflowEmployee)
+		api.Delete("/workflows/{id}/employees/{empId}", d.removeWorkflowEmployee)
+		api.Get("/me/workflows", d.myWorkflows)
 
 		api.Get("/tasks", d.listTasks)
 		api.Post("/tasks", d.createTask)
@@ -442,6 +447,120 @@ func (d Deps) myProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"projects": out})
 }
 
+// myTasks returns 全部当前用户能"看到"的需求 —— 用户作为成员加入的工作流里
+// 的所有任务。每条任务额外标记：
+//   - bound_node_keys: 用户被分配到的节点（在该任务的 DAG 上）
+//   - at_my_node: 是否有任意一个绑定节点当前处于 awaiting_human（红点）
+//   - current_node_key: 当前最新非完成节点（用于"运行到哪一步"展示）
+// admin 看到全部工作流的全部任务。
+func (d Deps) myTasks(w http.ResponseWriter, r *http.Request) {
+	uid := currentUserID(r)
+	if uid == nil {
+		writeErr(w, 401, errors.New("X-User-Id required"))
+		return
+	}
+	q := d.Store.Q()
+	wsID := q.DefaultWorkspaceID()
+
+	users, _ := q.ListUsers(r.Context(), wsID)
+	var role string
+	for _, u := range users {
+		if u.ID == *uid {
+			role = u.Role
+			break
+		}
+	}
+
+	// 收集"我属于的工作流"和"我作为员工的 ID"
+	var empID string
+	myWorkflowIDs := map[string]bool{}
+	if role == "admin" {
+		wfs, _ := q.ListWorkflows(r.Context(), wsID)
+		for _, wf := range wfs {
+			myWorkflowIDs[wf.ID.String()] = true
+		}
+	} else {
+		emp, err := q.EmployeeByUserID(r.Context(), *uid)
+		if err != nil {
+			writeJSON(w, 200, map[string]any{"tasks": []any{}})
+			return
+		}
+		empID = emp.ID.String()
+		ids, _ := q.ListWorkflowsByEmployee(r.Context(), emp.ID)
+		for _, id := range ids {
+			myWorkflowIDs[id.String()] = true
+		}
+	}
+
+	// workflow_version_id → workflow_id 的缓存（避免每个任务多查一次）
+	vvCache := map[string]uuid.UUID{}
+
+	type item struct {
+		Task           model.Task `json:"task"`
+		WorkflowID     string     `json:"workflow_id"`
+		BoundNodeKeys  []string   `json:"bound_node_keys"`
+		AtMyNode       bool       `json:"at_my_node"`
+		CurrentNodeKey string     `json:"current_node_key"`
+	}
+	out := []item{}
+	tasks, _ := q.ListTasks(r.Context(), wsID)
+	for _, t := range tasks {
+		wfIDStr, ok := vvCache[t.WorkflowVersionID.String()]
+		if !ok {
+			wv, err := q.WorkflowVersion(r.Context(), t.WorkflowVersionID)
+			if err != nil {
+				continue
+			}
+			wfIDStr = wv.WorkflowID
+			vvCache[t.WorkflowVersionID.String()] = wfIDStr
+		}
+		if !myWorkflowIDs[wfIDStr.String()] {
+			continue
+		}
+		wv, err := q.WorkflowVersion(r.Context(), t.WorkflowVersionID)
+		if err != nil {
+			continue
+		}
+		dag, _ := model.ParseDAG(wv.DAG)
+		bound := []string{}
+		if empID != "" {
+			for _, n := range dag.Nodes {
+				for _, id := range n.AssigneeEmployeeIDs {
+					if id == empID {
+						bound = append(bound, n.Key)
+						break
+					}
+				}
+			}
+		}
+		runs, _ := q.ListNodeRunsByTask(r.Context(), t.ID)
+		atMine := false
+		currentNode := ""
+		for _, run := range runs {
+			if run.Status == model.StatusDone || run.Status == model.StatusRolledBack {
+				continue
+			}
+			currentNode = run.NodeKey
+			if run.Status == model.StatusAwaitingHuman {
+				for _, k := range bound {
+					if run.NodeKey == k {
+						atMine = true
+						break
+					}
+				}
+			}
+		}
+		out = append(out, item{
+			Task:           t,
+			WorkflowID:     wfIDStr.String(),
+			BoundNodeKeys:  bound,
+			AtMyNode:       atMine,
+			CurrentNodeKey: currentNode,
+		})
+	}
+	writeJSON(w, 200, map[string]any{"tasks": out})
+}
+
 // myAssignments returns tasks where the current user has at least one
 // awaiting node — i.e. their "todo list" upon login.
 func (d Deps) myAssignments(w http.ResponseWriter, r *http.Request) {
@@ -549,43 +668,245 @@ func (d Deps) listEmployees(w http.ResponseWriter, r *http.Request) {
 }
 
 type createEmployeeBody struct {
+	// Kind = "digital" (默认，AI 员工) 或 "human" (人类员工，绑定一个已存在 user_id)
+	Kind         string   `json:"kind,omitempty"`
 	Role         string   `json:"role"`
 	Name         string   `json:"name"`
 	Avatar       *string  `json:"avatar"`
 	SystemPrompt string   `json:"system_prompt"`
 	Tools        []string `json:"tools"`
 	Model        string   `json:"model"`
+	// human 模式必填：要绑定的 user_id
+	UserID       string   `json:"user_id,omitempty"`
+	IMProvider   string   `json:"im_provider,omitempty"`
+	IMExternalID string   `json:"im_external_id,omitempty"`
+	IMHandle     string   `json:"im_handle,omitempty"`
 }
 
-// createEmployee creates a *pure-AI* employee (no bound user, no IM).
-// Real-human employees come in via /auth/register.
+// createEmployee 创建员工。kind=digital(默认) 为纯 AI 员工；kind=human 为
+// 人类员工，必须提供已存在 user_id，绑定到该 user。
 func (d Deps) createEmployee(w http.ResponseWriter, r *http.Request) {
 	var b createEmployeeBody
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
 		writeErr(w, 400, err)
 		return
 	}
+	kind := strings.TrimSpace(b.Kind)
+	if kind == "" {
+		kind = "digital"
+	}
+	if kind != "digital" && kind != "human" {
+		writeErr(w, 400, errors.New("kind must be digital|human"))
+		return
+	}
+	q := d.Store.Q()
+	wsID := q.DefaultWorkspaceID()
+
+	if kind == "human" {
+		uid, err := uuid.Parse(b.UserID)
+		if err != nil {
+			writeErr(w, 400, errors.New("human employee requires valid user_id"))
+			return
+		}
+		u, err := q.GetUser(r.Context(), uid)
+		if err != nil {
+			writeErr(w, 400, errors.New("user not found"))
+			return
+		}
+		if _, err := q.EmployeeByUserID(r.Context(), uid); err == nil {
+			writeErr(w, 409, errors.New("user already bound to an employee"))
+			return
+		}
+		name := strings.TrimSpace(b.Name)
+		if name == "" {
+			name = u.Name
+		}
+		role := strings.TrimSpace(b.Role)
+		if role == "" {
+			role = "member"
+		}
+		prompt := strings.TrimSpace(b.SystemPrompt)
+		if prompt == "" {
+			prompt = "你代表真实员工 · 在工作流节点上提供人工确认与决策。"
+		}
+		toolsRaw, _ := json.Marshal([]string{"search-skill"})
+		var prov, ext, handle *string
+		if b.IMProvider != "" {
+			prov = &b.IMProvider
+		}
+		if b.IMExternalID != "" {
+			ext = &b.IMExternalID
+		}
+		if b.IMHandle != "" {
+			handle = &b.IMHandle
+		}
+		e, err := q.CreateEmployee(r.Context(), store.CreateEmployeeParams{
+			WorkspaceID:  wsID,
+			Role:         role,
+			Name:         name,
+			Avatar:       b.Avatar,
+			SystemPrompt: prompt,
+			Tools:        toolsRaw,
+			Model:        "claude-opus-4-7",
+			BoundUserID:  &uid,
+			IMProvider:   prov,
+			IMExternalID: ext,
+			IMHandle:     handle,
+			IsActive:     true,
+		})
+		if err != nil {
+			writeErr(w, 500, err)
+			return
+		}
+		writeJSON(w, 201, e)
+		return
+	}
+
+	// digital
 	if b.Role == "" || b.Name == "" || b.SystemPrompt == "" {
 		writeErr(w, 400, errors.New("role/name/system_prompt required"))
 		return
 	}
 	tools, _ := json.Marshal(b.Tools)
-	q := d.Store.Q()
 	e, err := q.CreateEmployee(r.Context(), store.CreateEmployeeParams{
-		WorkspaceID:  q.DefaultWorkspaceID(),
+		WorkspaceID:  wsID,
 		Role:         b.Role,
 		Name:         b.Name,
 		Avatar:       b.Avatar,
 		SystemPrompt: b.SystemPrompt,
 		Tools:        tools,
 		Model:        b.Model,
-		IsActive:     true, // admin-created pure-AI employees are usable immediately
+		IsActive:     true,
 	})
 	if err != nil {
 		writeErr(w, 500, err)
 		return
 	}
 	writeJSON(w, 201, e)
+}
+
+// listWorkflowEmployees 返回某个工作流绑定的全部员工（完整 Employee 对象）。
+func (d Deps) listWorkflowEmployees(w http.ResponseWriter, r *http.Request) {
+	wfID, err := uuidParam(r, "id")
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	q := d.Store.Q()
+	ids, err := q.ListWorkflowEmployees(r.Context(), wfID)
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	out := []model.Employee{}
+	for _, id := range ids {
+		e, err := q.GetEmployee(r.Context(), id)
+		if err == nil {
+			out = append(out, e)
+		}
+	}
+	writeJSON(w, 200, out)
+}
+
+type wfEmployeeBody struct {
+	EmployeeID string `json:"employee_id"`
+}
+
+// addWorkflowEmployee 把员工加入工作流。仅 admin 可调用。
+func (d Deps) addWorkflowEmployee(w http.ResponseWriter, r *http.Request) {
+	if err := d.adminOnly(r); err != nil {
+		writeErr(w, 403, err)
+		return
+	}
+	wfID, err := uuidParam(r, "id")
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	var b wfEmployeeBody
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	empID, err := uuid.Parse(b.EmployeeID)
+	if err != nil {
+		writeErr(w, 400, errors.New("invalid employee_id"))
+		return
+	}
+	if err := d.Store.Q().AddWorkflowEmployee(r.Context(), wfID, empID); err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 201, map[string]any{"ok": true})
+}
+
+// removeWorkflowEmployee 把员工移出工作流。仅 admin 可调用。
+func (d Deps) removeWorkflowEmployee(w http.ResponseWriter, r *http.Request) {
+	if err := d.adminOnly(r); err != nil {
+		writeErr(w, 403, err)
+		return
+	}
+	wfID, err := uuidParam(r, "id")
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	empID, err := uuid.Parse(chi.URLParam(r, "empId"))
+	if err != nil {
+		writeErr(w, 400, errors.New("invalid empId"))
+		return
+	}
+	if err := d.Store.Q().RemoveWorkflowEmployee(r.Context(), wfID, empID); err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// myWorkflows 返回当前登录用户所属（其 Employee 已加入）的工作流列表。
+// 用于"创建需求"前的工作流选择。admin 不受限制 — 返回全部工作流。
+func (d Deps) myWorkflows(w http.ResponseWriter, r *http.Request) {
+	uid := currentUserID(r)
+	if uid == nil {
+		writeErr(w, 401, errors.New("X-User-Id required"))
+		return
+	}
+	q := d.Store.Q()
+	users, _ := q.ListUsers(r.Context(), q.DefaultWorkspaceID())
+	var role string
+	for _, u := range users {
+		if u.ID == *uid {
+			role = u.Role
+			break
+		}
+	}
+	if role == "admin" {
+		wfs, err := q.ListWorkflows(r.Context(), q.DefaultWorkspaceID())
+		if err != nil {
+			writeErr(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, wfs)
+		return
+	}
+	emp, err := q.EmployeeByUserID(r.Context(), *uid)
+	if err != nil {
+		writeJSON(w, 200, []model.Workflow{})
+		return
+	}
+	ids, _ := q.ListWorkflowsByEmployee(r.Context(), emp.ID)
+	out := []model.Workflow{}
+	for _, id := range ids {
+		// reuse listWorkflows + filter; cheap given small N
+		wfs, _ := q.ListWorkflows(r.Context(), q.DefaultWorkspaceID())
+		for _, wf := range wfs {
+			if wf.ID == id {
+				out = append(out, wf)
+				break
+			}
+		}
+	}
+	writeJSON(w, 200, out)
 }
 
 func (d Deps) listWorkflows(w http.ResponseWriter, r *http.Request) {
@@ -669,11 +990,12 @@ func (d Deps) listTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 type createTaskBody struct {
-	Title       string                   `json:"title"`
-	Source      string                   `json:"source"`
-	Content     string                   `json:"content"`
-	Attachments []map[string]any         `json:"attachments,omitempty"`
-	UserID      *string                  `json:"user_id"`
+	WorkflowID  *string          `json:"workflow_id,omitempty"`
+	Title       string           `json:"title"`
+	Source      string           `json:"source"`
+	Content     string           `json:"content"`
+	Attachments []map[string]any `json:"attachments,omitempty"`
+	UserID      *string          `json:"user_id"`
 }
 
 func (d Deps) createTask(w http.ResponseWriter, r *http.Request) {
@@ -690,10 +1012,37 @@ func (d Deps) createTask(w http.ResponseWriter, r *http.Request) {
 		b.Source = "product"
 	}
 	q := d.Store.Q()
-	wf, err := q.DefaultWorkflow(r.Context(), q.DefaultWorkspaceID())
-	if err != nil {
-		writeErr(w, 500, err)
-		return
+	var wf model.Workflow
+	if b.WorkflowID != nil && *b.WorkflowID != "" {
+		wid, err := uuid.Parse(*b.WorkflowID)
+		if err != nil {
+			writeErr(w, 400, errors.New("invalid workflow_id"))
+			return
+		}
+		wfs, err := q.ListWorkflows(r.Context(), q.DefaultWorkspaceID())
+		if err != nil {
+			writeErr(w, 500, err)
+			return
+		}
+		var found bool
+		for _, x := range wfs {
+			if x.ID == wid {
+				wf = x
+				found = true
+				break
+			}
+		}
+		if !found {
+			writeErr(w, 404, errors.New("workflow not found"))
+			return
+		}
+	} else {
+		var err error
+		wf, err = q.DefaultWorkflow(r.Context(), q.DefaultWorkspaceID())
+		if err != nil {
+			writeErr(w, 500, err)
+			return
+		}
 	}
 	wv, err := q.WorkflowActiveVersion(r.Context(), wf.ID)
 	if err != nil {

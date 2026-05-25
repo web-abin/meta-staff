@@ -40,6 +40,11 @@ type Q interface {
 	WorkflowVersion(ctx context.Context, id uuid.UUID) (model.WorkflowVersion, error)
 	NewWorkflowVersion(ctx context.Context, p UpsertWorkflowVersionParams) (model.WorkflowVersion, error)
 
+	ListWorkflowEmployees(ctx context.Context, workflowID uuid.UUID) ([]uuid.UUID, error)
+	ListWorkflowsByEmployee(ctx context.Context, employeeID uuid.UUID) ([]uuid.UUID, error)
+	AddWorkflowEmployee(ctx context.Context, workflowID, employeeID uuid.UUID) error
+	RemoveWorkflowEmployee(ctx context.Context, workflowID, employeeID uuid.UUID) error
+
 	CreateTask(ctx context.Context, p CreateTaskParams) (model.Task, error)
 	ListTasks(ctx context.Context, wsID uuid.UUID) ([]model.Task, error)
 	GetTask(ctx context.Context, id uuid.UUID) (model.Task, error)
@@ -388,6 +393,57 @@ func (q *pgQ) NewWorkflowVersion(ctx context.Context, p UpsertWorkflowVersionPar
 		return v, err
 	}
 	return v, nil
+}
+
+// ============== workflow_employees ==============
+
+func (q *pgQ) ListWorkflowEmployees(ctx context.Context, workflowID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx,
+		`select employee_id from workflow_employees where workflow_id=$1 order by added_at`, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+func (q *pgQ) ListWorkflowsByEmployee(ctx context.Context, employeeID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx,
+		`select workflow_id from workflow_employees where employee_id=$1 order by added_at`, employeeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+func (q *pgQ) AddWorkflowEmployee(ctx context.Context, workflowID, employeeID uuid.UUID) error {
+	_, err := q.db.Exec(ctx,
+		`insert into workflow_employees(workflow_id, employee_id) values($1,$2)
+		 on conflict do nothing`, workflowID, employeeID)
+	return err
+}
+
+func (q *pgQ) RemoveWorkflowEmployee(ctx context.Context, workflowID, employeeID uuid.UUID) error {
+	_, err := q.db.Exec(ctx,
+		`delete from workflow_employees where workflow_id=$1 and employee_id=$2`, workflowID, employeeID)
+	return err
 }
 
 // ============== tasks ==============
