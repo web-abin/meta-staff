@@ -156,6 +156,11 @@ const M = {
   "debug.saving": { zh: "保存中…", en: "Saving…" },
   "debug.saved_at": { zh: "已保存：", en: "Saved at: " },
   "debug.open_preview": { zh: "在新窗口打开", en: "Open in new tab" },
+  "debug.workspace": { zh: "Hermes 工作目录", en: "Hermes workspace" },
+  "debug.workspace_hint": { zh: "Hermes 在容器内 /workspace 写的文件，宿主机 = $HERMES_WORKSPACE_DIR；按修改时间倒序，前 200 个", en: "Files hermes wrote under container /workspace (host = $HERMES_WORKSPACE_DIR); newest 200" },
+  "debug.workspace_refresh": { zh: "刷新", en: "Refresh" },
+  "debug.workspace_disabled": { zh: "未启用：服务器 .env 没配 HERMES_WORKSPACE_DIR", en: "Disabled: server .env missing HERMES_WORKSPACE_DIR" },
+  "debug.workspace_empty": { zh: "还没文件 — Hermes 没写过 / 或不会使用文件工具", en: "Empty — hermes hasn't written, or it lacks fs tools" },
 
   // Create-task modal (intake first node)
   "new_task.title": { zh: "创建新需求", en: "New request" },

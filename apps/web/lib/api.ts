@@ -184,6 +184,12 @@ export const api = {
       "/debug/save-html",
       { method: "POST", json: body }
     ),
+  debugWorkspace: () =>
+    request<{
+      enabled: boolean;
+      root?: string;
+      files: { path: string; url: string; size: number; modified: string }[];
+    }>("/debug/workspace"),
 };
 
 export function setActiveUserId(id: string | null) {

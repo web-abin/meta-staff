@@ -7,8 +7,12 @@ import { api } from "../../../lib/api";
 import { useT } from "../../../lib/i18n";
 import { isAdmin, useUser } from "../../../lib/user";
 
-const DEFAULT_PROMPT =
-  "用单页 HTML 写一个贪吃蛇游戏，键盘方向键控制，吃到食物加分，撞墙或撞自己游戏结束。所有 CSS / JS 都内联在 <style> 和 <script> 里，不能引用任何外部资源。只输出一个完整 <html>…</html>，不要别的话。";
+const DEFAULT_PROMPT = `在 /workspace/snake-game/ 下用纯前端实现一个贪吃蛇游戏。
+
+要求：
+1. 用你的文件系统/shell 工具真正创建文件，不要只在回复里贴代码。先 mkdir -p /workspace/snake-game，然后在该目录写 index.html、style.css、app.js 三个文件。
+2. 键盘方向键控制蛇，吃到食物加分，撞墙或撞自身游戏结束，分数显示在画面上。
+3. 完成后总结：项目根路径 + 写入的文件列表 + 用户访问 index.html 的相对 URL。`;
 
 export default function DebugPage() {
   const { t } = useT();
@@ -17,7 +21,7 @@ export default function DebugPage() {
 
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [system, setSystem] = useState(
-    "你是一个资深前端工程师，输出干净自包含的 HTML。"
+    "你是一个资深前端工程师。你的工作目录是 /workspace（可读可写）。需要创建文件时，必须用 filesystem / shell 工具实际写入文件，不要只在对话里贴代码片段。所有路径都基于 /workspace。"
   );
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0); // seconds, while polling
@@ -33,13 +37,36 @@ export default function DebugPage() {
   const [saved, setSaved] = useState<{ url: string; path: string } | null>(null);
   const [saveErr, setSaveErr] = useState<string | null>(null);
 
+  const [workspace, setWorkspace] = useState<{
+    enabled: boolean;
+    root?: string;
+    files: { path: string; url: string; size: number; modified: string }[];
+  } | null>(null);
+  const [wsLoading, setWsLoading] = useState(false);
+
+  async function refreshWorkspace() {
+    setWsLoading(true);
+    try {
+      const r = await api.debugWorkspace();
+      setWorkspace(r);
+    } catch (e) {
+      setWorkspace({ enabled: false, files: [] });
+    } finally {
+      setWsLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (!ready) return;
     if (!me) {
       router.replace("/login");
       return;
     }
-    if (!isAdmin(me)) router.replace("/projects");
+    if (!isAdmin(me)) {
+      router.replace("/projects");
+      return;
+    }
+    void refreshWorkspace();
   }, [ready, me, router]);
 
   const extracted = useMemo(() => extractHTML(result?.text), [result?.text]);
@@ -88,6 +115,7 @@ export default function DebugPage() {
     } finally {
       clearInterval(tickTimer);
       setBusy(false);
+      void refreshWorkspace();
     }
   }
 
@@ -253,6 +281,80 @@ export default function DebugPage() {
               </div>
             )}
           </div>
+        )}
+      </div>
+
+      <div className="mt-6 card p-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-[14px] font-medium">{t("debug.workspace")}</div>
+            <div className="mt-0.5 text-[11px]" style={{ color: "var(--text-3)" }}>
+              {t("debug.workspace_hint")}
+              {workspace?.root && (
+                <span className="ml-2 font-mono">{workspace.root}</span>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={refreshWorkspace}
+            disabled={wsLoading}
+            className="btn btn-sm"
+          >
+            {wsLoading ? "…" : t("debug.workspace_refresh")}
+          </button>
+        </div>
+
+        {workspace && !workspace.enabled && (
+          <div
+            className="mt-3 p-3 rounded-md text-[12px]"
+            style={{ background: "#fdeded", color: "var(--danger)" }}
+          >
+            {t("debug.workspace_disabled")}
+          </div>
+        )}
+
+        {workspace?.enabled && workspace.files.length === 0 && (
+          <div
+            className="mt-3 p-3 rounded-md text-[12px]"
+            style={{ background: "var(--bg-soft)", color: "var(--text-3)" }}
+          >
+            {t("debug.workspace_empty")}
+          </div>
+        )}
+
+        {workspace?.enabled && workspace.files.length > 0 && (
+          <ul className="mt-3 space-y-1.5">
+            {workspace.files.map((f) => (
+              <li
+                key={f.path}
+                className="flex items-center gap-2 text-[13px] p-2 rounded-md"
+                style={{ background: "var(--bg-soft)" }}
+              >
+                <span style={{ color: "var(--text-3)" }}>📄</span>
+                <span className="font-mono text-[12px] flex-1 truncate">{f.path}</span>
+                <span className="text-[11px]" style={{ color: "var(--text-3)" }}>
+                  {f.size}B
+                </span>
+                <span
+                  className="text-[11px] font-mono"
+                  style={{ color: "var(--text-3)" }}
+                  title={f.modified}
+                >
+                  {f.modified.slice(11, 19)}
+                </span>
+                <a
+                  href={f.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn btn-sm"
+                  style={{ color: "var(--primary)" }}
+                >
+                  ↗
+                </a>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
     </div>

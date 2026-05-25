@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +58,13 @@ func Router(d Deps) http.Handler {
 		fs := http.FileServer(http.Dir(d.Sandbox.RuntimeDir))
 		r.Handle("/static/*", http.StripPrefix("/static/", fs))
 	}
+	// Hermes workspace mount: 浏览器可访问 hermes 在容器内 /workspace 写的文件。
+	// e.g. hermes 写 /workspace/snake-game/index.html → 宿主机 $HERMES_WORKSPACE_DIR/snake-game/index.html
+	// → 浏览器 GET /static/workspace/snake-game/index.html
+	if d.Cfg.HermesWorkspaceDir != "" {
+		wsFS := http.FileServer(http.Dir(d.Cfg.HermesWorkspaceDir))
+		r.Handle("/static/workspace/*", http.StripPrefix("/static/workspace/", wsFS))
+	}
 
 	r.Route("/api", func(api chi.Router) {
 		api.Get("/healthz", d.healthz)
@@ -103,6 +111,7 @@ func Router(d Deps) http.Handler {
 		api.Post("/debug/llm-chat", d.debugLLMChat)
 		api.Get("/debug/llm-chat/{id}", d.debugLLMChatJob)
 		api.Post("/debug/save-html", d.debugSaveHTML)
+		api.Get("/debug/workspace", d.debugWorkspace)
 	})
 	return r
 }
@@ -1157,6 +1166,47 @@ func (d Deps) debugLLMChat(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	writeJSON(w, 202, map[string]any{"job_id": id, "status": "running"})
+}
+
+// debugWorkspace 递归列出 HermesWorkspaceDir 下所有文件，按 mtime 倒序，最多 200 个。
+// 用于调试台展示"hermes 在 /workspace 下到底写了什么"。
+func (d Deps) debugWorkspace(w http.ResponseWriter, r *http.Request) {
+	if err := d.adminOnly(r); err != nil {
+		writeErr(w, 403, err)
+		return
+	}
+	root := d.Cfg.HermesWorkspaceDir
+	if root == "" {
+		writeJSON(w, 200, map[string]any{"enabled": false, "files": []any{}})
+		return
+	}
+	type entry struct {
+		Path string `json:"path"` // relative to root
+		URL  string `json:"url"`
+		Size int64  `json:"size"`
+		Mod  string `json:"modified"`
+	}
+	var out []entry
+	filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, p)
+		rel = filepath.ToSlash(rel)
+		out = append(out, entry{
+			Path: rel,
+			URL:  "/static/workspace/" + rel,
+			Size: info.Size(),
+			Mod:  info.ModTime().UTC().Format(time.RFC3339),
+		})
+		return nil
+	})
+	// mtime desc
+	sort.Slice(out, func(i, j int) bool { return out[i].Mod > out[j].Mod })
+	if len(out) > 200 {
+		out = out[:200]
+	}
+	writeJSON(w, 200, map[string]any{"enabled": true, "root": root, "files": out})
 }
 
 // debugLLMChatJob 查询 job 状态/结果。前端每隔 2s 轮询一次直到 status != running。
