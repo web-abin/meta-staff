@@ -12,6 +12,9 @@ interface Props {
   allEmployees: Employee[];
   // 只显示属于当前工作流的人类员工作为候选真人助手。空集合时回退到 allEmployees。
   workflowMemberIDs?: Set<string>;
+  // 当前登录用户的 user.id —— 用来保证"自己"始终出现在候选列表里，
+  // 即使还没被加入到 workflow_employees。
+  currentUserID?: string;
   onPatch: (patch: Partial<DAGNode>) => void;
   onPatchInstance: (patch: Partial<DAGNodeInstance>) => void;
   onRemove: () => void;
@@ -24,6 +27,7 @@ export function NodeDetail({
   empByID,
   allEmployees,
   workflowMemberIDs,
+  currentUserID,
   onPatchInstance,
   onRemove,
   onAddHelper,
@@ -62,15 +66,27 @@ export function NodeDetail({
   const helpers = assignees.slice(1);
   const helperIds = new Set(helpers.map((e) => e.id));
 
-  // Candidate helpers = real-person employees, 属于当前工作流，且未在节点上
-  const candidates = allEmployees.filter(
-    (e) =>
-      !!e.bound_user_id &&
-      e.id !== typeEmp?.id &&
-      !helperIds.has(e.id) &&
-      e.is_active &&
-      (!workflowMemberIDs || workflowMemberIDs.size === 0 || workflowMemberIDs.has(e.id))
-  );
+  // Candidate helpers = real-person employees, 属于当前工作流，且未在节点上。
+  // "自己" 始终出现在候选列表里，即使还没被加入 workflow_employees ——
+  // 添加时会顺手把自己加进工作流成员。
+  const candidates = allEmployees.filter((e) => {
+    if (!e.bound_user_id || !e.is_active) return false;
+    if (e.id === typeEmp?.id) return false;
+    if (helperIds.has(e.id)) return false;
+    const isSelf = !!currentUserID && e.bound_user_id === currentUserID;
+    if (isSelf) return true;
+    return (
+      !workflowMemberIDs ||
+      workflowMemberIDs.size === 0 ||
+      workflowMemberIDs.has(e.id)
+    );
+  });
+  // Sort "self" to the top for visibility.
+  candidates.sort((a, b) => {
+    const aSelf = !!currentUserID && a.bound_user_id === currentUserID ? 0 : 1;
+    const bSelf = !!currentUserID && b.bound_user_id === currentUserID ? 0 : 1;
+    return aSelf - bSelf;
+  });
 
   // Effective instance values (fall back to type for legacy nodes that have
   // no instance object yet — edits then create one).
@@ -225,30 +241,43 @@ export function NodeDetail({
                 boxShadow: "var(--shadow-lg)",
               }}
             >
-              {candidates.map((e) => (
-                <button
-                  type="button"
-                  key={e.id}
-                  onClick={() => {
-                    onAddHelper(e.id);
-                    setPickerOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-2 flex items-center gap-2.5 hover:bg-[var(--bg-hover)]"
-                >
-                  <span
-                    className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[12px] font-medium"
-                    style={{ background: "#fff4e5", color: "var(--warning)" }}
+              {candidates.map((e) => {
+                const isSelf = !!currentUserID && e.bound_user_id === currentUserID;
+                return (
+                  <button
+                    type="button"
+                    key={e.id}
+                    onClick={() => {
+                      onAddHelper(e.id);
+                      // 不关闭面板 —— 允许连续添加多个。候选列表会自动剔除已加的。
+                    }}
+                    className="w-full text-left px-3 py-2 flex items-center gap-2.5 hover:bg-[var(--bg-hover)]"
                   >
-                    {e.avatar || e.name.slice(0, 1)}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[13px] truncate">{e.name}</div>
-                    <div className="text-[11px]" style={{ color: "var(--text-3)" }}>
-                      {e.role}
+                    <span
+                      className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[12px] font-medium"
+                      style={{ background: "#fff4e5", color: "var(--warning)" }}
+                    >
+                      {e.avatar || e.name.slice(0, 1)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] truncate">
+                        {e.name}
+                        {isSelf && (
+                          <span
+                            className="ml-1.5 text-[10px] px-1 py-0.5 rounded"
+                            style={{ background: "var(--primary-soft)", color: "var(--primary)" }}
+                          >
+                            我
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px]" style={{ color: "var(--text-3)" }}>
+                        {e.role}
+                      </div>
                     </div>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>

@@ -132,8 +132,22 @@ export default function WorkflowEditorPage() {
       const list = selected.assignee_employee_ids ?? [];
       if (list.includes(empId)) return;
       patchSelected({ assignee_employee_ids: [...list, empId] });
+      // 同步把这个员工登记成工作流成员（含"自己"——admin 在新建工作流时不一定
+      // 在 workflow_employees 里）。失败静默：DAG 已就绪。
+      if (wf && !workflowEmployeeIDs.has(empId)) {
+        api
+          .addWorkflowEmployee(wf.id, empId)
+          .then(() => {
+            setWorkflowEmployeeIDs((prev) => {
+              const next = new Set(prev);
+              next.add(empId);
+              return next;
+            });
+          })
+          .catch(() => {});
+      }
     },
-    [selected, patchSelected]
+    [selected, patchSelected, wf, workflowEmployeeIDs]
   );
 
   const removeHelper = useCallback(
@@ -295,6 +309,7 @@ export default function WorkflowEditorPage() {
           empByID={empByID}
           allEmployees={employees}
           workflowMemberIDs={workflowEmployeeIDs}
+          currentUserID={me?.id}
           onPatch={patchSelected}
           onPatchInstance={patchSelectedInstance}
           onRemove={removeSelected}
