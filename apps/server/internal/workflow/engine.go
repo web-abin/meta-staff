@@ -342,9 +342,11 @@ func (e *Engine) advance(ctx context.Context, taskID uuid.UUID, fromNodeKey stri
 }
 
 // nodeRoute classifies a node based on its assignees:
-//   - "intake":   any one of human assignees submits, no AI step (is_intake=true)
-//   - "auto":     all assignees are pure-AI (or no humans bound) → runAgent, no human gate
-//   - "confirm":  ≥1 human assignee → wait for all human assignees to approve (会签)
+//   - "intake":   is_intake=true → any one human assignee submits (no quorum)
+//   - "auto":     a digital-employee assignee is present → AI runs the node.
+//                 Human helpers (if any) are NOT voters — they are only
+//                 recipients of "AI needs help" notifications.
+//   - "confirm":  no digital-employee assignee but ≥1 human assignee → 会签
 //
 // Falls back to legacy node.Type/Role when assignees are empty (for old DAGs).
 func (e *Engine) nodeRoute(ctx context.Context, wsID uuid.UUID, node model.DAGNode) (
@@ -373,11 +375,11 @@ func (e *Engine) nodeRoute(ctx context.Context, wsID uuid.UUID, node model.DAGNo
 		if node.IsIntake {
 			return "intake", nil, humanAssignees
 		}
-		if len(humanAssignees) > 0 {
-			return "confirm", primaryAI, humanAssignees
-		}
 		if primaryAI != nil {
-			return "auto", primaryAI, nil
+			return "auto", primaryAI, humanAssignees
+		}
+		if len(humanAssignees) > 0 {
+			return "confirm", nil, humanAssignees
 		}
 		// Empty / unresolvable assignees — treat as system auto-no-op
 		return "auto", nil, nil

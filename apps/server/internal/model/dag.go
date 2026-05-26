@@ -17,9 +17,12 @@ type DAGNode struct {
 	Produces string `json:"produces"`
 
 	// New model: a node binds 1+ employees via AssigneeEmployeeIDs.
-	// Pure-AI employees (no IM) make the node "auto"; real-human assignees
-	// make it "confirm" (会签 across all human assignees). Intake nodes are
-	// human-only: any one assignee submits → advance (no quorum).
+	// [0] is the digital-employee TYPE that owns the node; [1..] are
+	// real-person helpers. Helpers do NOT change the node's execution type —
+	// the node still runs as AI ("auto"). They only get notified when the AI
+	// needs human assistance. Pure-human nodes (no AI in [0]) still fall back
+	// to "confirm" 会签. Intake nodes (IsIntake) are human-only: any one
+	// assignee submits → advance.
 	IsIntake            bool     `json:"is_intake,omitempty"`
 	AssigneeEmployeeIDs []string `json:"assignee_employee_ids,omitempty"`
 

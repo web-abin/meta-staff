@@ -204,6 +204,9 @@ const M = {
   "wb.emp_section_sub": { zh: "管理可复用的员工模板：提示词、工具、技能。修改后所有引用此类型的实例同步生效", en: "Reusable templates: prompts, tools, skills. Changes propagate to every instance" },
   "wb.emp_open": { zh: "进入详情", en: "Configure" },
   "wb.emp_inactive": { zh: "未激活", en: "Inactive" },
+  "wb.tasks_section": { zh: "我的任务", en: "My tasks" },
+  "wb.tasks_section_sub": { zh: "你被绑定到节点上的任务；红点表示轮到你处理", en: "Tasks where you're bound to a node; red dot means it's your turn" },
+  "wb.tasks_empty": { zh: "暂无任务", en: "No tasks" },
 
   // Workflows (admin)
   "wf.list.title": { zh: "工作流", en: "Workflows" },

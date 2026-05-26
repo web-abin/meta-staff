@@ -479,6 +479,11 @@ func (d Deps) myTasks(w http.ResponseWriter, r *http.Request) {
 		for _, wf := range wfs {
 			myWorkflowIDs[wf.ID.String()] = true
 		}
+		// admin 也可能被绑定到节点上（自 5a5d202 起 admin 也有 Employee 记录），
+		// 解析后用同一套 bound_node_keys / at_my_node 逻辑。
+		if emp, err := q.EmployeeByUserID(r.Context(), *uid); err == nil {
+			empID = emp.ID.String()
+		}
 	} else {
 		emp, err := q.EmployeeByUserID(r.Context(), *uid)
 		if err != nil {

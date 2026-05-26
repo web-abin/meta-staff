@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 
 import { api } from "../../../../lib/api";
 import { useT } from "../../../../lib/i18n";
-import { isAdmin, useUser } from "../../../../lib/user";
+import { useUser } from "../../../../lib/user";
 import { useEvents } from "../../../../lib/ws";
 import type { Employee, MyTaskItem, TaskDetail } from "../../../../lib/types";
 import { TaskHandler } from "./_task-handler";
@@ -16,7 +16,6 @@ export default function TaskDetailPage() {
   const params = useParams<{ id: string }>();
   const taskID = params.id;
   const { me, ready } = useUser();
-  const router = useRouter();
 
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [myInfo, setMyInfo] = useState<MyTaskItem | null>(null);
@@ -40,13 +39,10 @@ export default function TaskDetailPage() {
 
   useEffect(() => {
     if (!ready) return;
-    if (me && isAdmin(me)) {
-      router.replace("/workflows");
-      return;
-    }
+    // admin 也允许进入：admin 可以被绑定到节点上，需要看任务进度。
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, me, taskID, router]);
+  }, [ready, me, taskID]);
 
   useEvents(() => {
     void refresh();

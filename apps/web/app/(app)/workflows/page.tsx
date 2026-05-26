@@ -7,7 +7,8 @@ import { useRouter } from "next/navigation";
 import { api } from "../../../lib/api";
 import { useT } from "../../../lib/i18n";
 import { isAdmin, useUser } from "../../../lib/user";
-import type { Employee, Workflow } from "../../../lib/types";
+import { useEvents } from "../../../lib/ws";
+import type { Employee, MyTaskItem, Workflow } from "../../../lib/types";
 
 export default function WorkbenchPage() {
   const { t } = useT();
@@ -16,6 +17,7 @@ export default function WorkbenchPage() {
   const admin = isAdmin(me);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [tasks, setTasks] = useState<MyTaskItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -26,14 +28,23 @@ export default function WorkbenchPage() {
     }
     (async () => {
       try {
-        const [wfs, emps] = await Promise.all([api.workflows(), api.employees()]);
+        const [wfs, emps, ts] = await Promise.all([
+          api.workflows(),
+          api.employees(),
+          api.myTasks(),
+        ]);
         setWorkflows(wfs);
         setEmployees(emps);
+        setTasks(ts);
       } finally {
         setLoading(false);
       }
     })();
   }, [ready, me, admin, router]);
+
+  useEvents(() => {
+    api.myTasks().then(setTasks).catch(() => {});
+  });
 
   if (!ready || !me) return null;
 
@@ -148,6 +159,90 @@ export default function WorkbenchPage() {
                 </Link>
               ))}
           </div>
+        )}
+      </section>
+
+      <section>
+        <div className="flex items-baseline justify-between mb-4">
+          <div>
+            <h2 className="text-[18px] font-semibold">{t("wb.tasks_section")}</h2>
+            <p className="text-[13px] mt-0.5" style={{ color: "var(--text-3)" }}>
+              {t("wb.tasks_section_sub")}
+            </p>
+          </div>
+          <div className="text-[12px]" style={{ color: "var(--text-3)" }}>
+            {t("requests.count", { n: tasks.length })}
+          </div>
+        </div>
+        {loading ? (
+          <div className="text-[14px]" style={{ color: "var(--text-3)" }}>
+            {t("common.loading")}
+          </div>
+        ) : tasks.length === 0 ? (
+          <div
+            className="text-[13px] p-6 rounded-md text-center"
+            style={{ background: "var(--bg-soft)", color: "var(--text-3)" }}
+          >
+            {t("wb.tasks_empty")}
+          </div>
+        ) : (
+          <ul className="space-y-3">
+            {tasks.map((it) => (
+              <li key={it.task.id}>
+                <Link
+                  href={`/projects/${it.task.id}`}
+                  className="card block p-4 transition hover:border-[var(--border-strong)] relative"
+                >
+                  {it.at_my_node && (
+                    <span
+                      className="absolute top-3 right-3 inline-block w-2.5 h-2.5 rounded-full"
+                      style={{ background: "var(--danger)" }}
+                      aria-label="待处理"
+                    />
+                  )}
+                  <div className="flex items-start gap-3">
+                    <span
+                      className="inline-flex items-center justify-center w-10 h-10 rounded-md shrink-0"
+                      style={{
+                        background: it.at_my_node ? "#ffe5e5" : "var(--primary-soft)",
+                        color: it.at_my_node ? "var(--danger)" : "var(--primary)",
+                      }}
+                    >
+                      <FlowIcon />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[15px] font-medium truncate">{it.task.title}</div>
+                      <div
+                        className="mt-1 text-[12px] flex items-center gap-2 flex-wrap"
+                        style={{ color: "var(--text-3)" }}
+                      >
+                        <span>
+                          {t("requests.current_node")}: {it.current_node_key || "—"}
+                        </span>
+                        {it.bound_node_keys.length > 0 && (
+                          <>
+                            <span>·</span>
+                            <span>
+                              {t("requests.mine")}:{" "}
+                              <span className="font-mono">{it.bound_node_keys.join(", ")}</span>
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    {it.at_my_node && (
+                      <span
+                        className="text-[11px] px-2 py-0.5 rounded-md shrink-0"
+                        style={{ background: "#ffe5e5", color: "var(--danger)" }}
+                      >
+                        {t("requests.your_turn")}
+                      </span>
+                    )}
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
         )}
       </section>
     </div>

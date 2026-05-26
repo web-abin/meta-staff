@@ -57,23 +57,23 @@ server 默认端口 `:8080`，web 默认 `:3000`，web 通过 `NEXT_PUBLIC_API_B
 apps/web        Next.js 16 · React 19 · Tailwind（App Router）
 apps/server     Go 1.26 · Chi · sqlc · pgx/v5
   cmd/server      入口
-  internal/       workflow / employee / executor / artifact / ws / http / db / config
-  pkg/            llm（Anthropic + mock）/ skill（pgvector 检索）
+  internal/       api / workflow / model / llm / store / db / sandbox / notify / ws / config
 packages/shared-types  前后端共享 TS 类型
 runtime/        sandbox 预览 + 录屏产物（已 gitignore 之外的部分）
-scripts/        smoke.sh + playwright-record.mjs
+scripts/        smoke.sh / redeploy.sh / hermes-restart.sh / diag-metastaff.sh / playwright-record.mjs
 ```
 
 ## 改东西去哪改
 
-- **加一个工作流节点 / 改 DAG**：`apps/server/internal/workflow/`
-- **加 / 改数字员工角色 + prompt + tools**：`apps/server/internal/employee/`
-- **节点执行器（AI / 人工 / 自动化）**：`apps/server/internal/executor/`
-- **LLM Provider**：`apps/server/pkg/llm/`（Anthropic 默认，留 OpenAI/Gemini 扩展位）
-- **REST 路由**：`apps/server/internal/http/`
+- **工作流引擎 / DAG 推进**：`apps/server/internal/workflow/`（`engine.go`）
+- **DAG 类型 / 节点定义**：`apps/server/internal/model/`
+- **LLM Provider**：`apps/server/internal/llm/`（Anthropic / Hermes / mock）
+- **REST 路由**：`apps/server/internal/api/`
 - **WebSocket Hub**（状态推送）：`apps/server/internal/ws/`
+- **数据存储（内存队列 / 仓储）**：`apps/server/internal/store/`
+- **sandbox 预览 / 录屏**：`apps/server/internal/sandbox/`
 - **前端任务看板 / 节点详情 / 会签 UI**：`apps/web/app/`
-- **DB schema / migration**：`apps/server/migrations/` + `apps/server/sqlc.yaml`
+- **DB schema / migration**：`apps/server/internal/store/migrations/` + sqlc 查询 `apps/server/internal/db/queries/` + `apps/server/sqlc.yaml`
 
 ## 三份滚动文档
 
@@ -133,6 +133,74 @@ scripts/        smoke.sh + playwright-record.mjs
 - `smoke.sh` — 调 REST 跑完默认 10 步工作流，验证端到端。本地 / 线上都能用，`BASE=http://49.233.191.112:8080 bash scripts/smoke.sh` 就能打线上。
 - `redeploy.sh` — 服务器侧一键重新部署：`git pull` → `pnpm install` → 杀掉旧 tmux → 起新 tmux `metastaff`（跑 `make demo`） → 等 20s → 检查 llm provider / 端口 / `/api/healthz`。
 - `hermes-restart.sh` — 重启 `hermes` docker 容器，挂 `/workspace`。会从 `.env` / 旧容器里捞 `HERMES_API_KEY`，镜像缺了会按几个国内 mirror 依次试拉。环境变量：`HERMES_API_KEY` / `HERMES_WORKSPACE_DIR` / `HERMES_DATA_DIR` / `HERMES_IMAGE`。
+- `diag-metastaff.sh` — metastaff 起不来时的一键诊断：抓 tmux 状态、看 `make demo` 启动日志、单独跑一遍 go server 定位错误点。
 - `playwright-record.mjs` — server 通过 `RECORDER_PATH` 调起的录屏脚本，**不是**给用户跑的，列在这里只是别误删。
 
 新增脚本时记得回头来这一节补一行说明。
+
+
+## 通用编码守则（不限项目）
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+### 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+### 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+### 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
