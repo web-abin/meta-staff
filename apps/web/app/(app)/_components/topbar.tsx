@@ -23,12 +23,13 @@ export function Topbar() {
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!me || admin) return;
+    if (!me) return;
+    // admin 也有 Employee 记录（5a5d202 起），需要拉出来才能编辑昵称 / 备注 / IM。
     api
       .myEmployee()
       .then((e) => setEmployee(e))
       .catch(() => setEmployee(null));
-  }, [me, admin]);
+  }, [me]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -83,7 +84,7 @@ export function Topbar() {
             {t("header.new_task")}
           </button>
         )}
-        {!admin && empId && (
+        {empId && (
           <div
             className="flex items-center gap-2 px-3 py-1 rounded-md text-[12px]"
             style={{ background: "var(--bg-soft)" }}

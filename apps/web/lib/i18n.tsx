@@ -192,6 +192,10 @@ const M = {
 
   // Profile editor
   "profile.title": { zh: "编辑个人信息", en: "Edit profile" },
+  "profile.name": { zh: "昵称", en: "Display name" },
+  "profile.note": { zh: "备注", en: "Note" },
+  "profile.note_placeholder": { zh: "写点自己的简介、擅长方向、值班时段……都行", en: "Bio, focus areas, availability — anything useful" },
+  "profile.no_employee": { zh: "你还没有员工记录 —— 在工作台里完成 onboard 后再来。", en: "No employee record yet — finish onboarding from the workbench first." },
   "profile.im_provider": { zh: "IM 渠道", en: "IM provider" },
   "profile.im_id": { zh: "IM 账号 ID", en: "IM account ID" },
   "profile.im_handle": { zh: "IM 昵称", en: "IM handle" },

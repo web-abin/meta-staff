@@ -16,6 +16,8 @@ export function ProfileModal({
   onSaved: (e: Employee) => void;
 }) {
   const { t } = useT();
+  const [name, setName] = useState(employee?.name ?? "");
+  const [note, setNote] = useState(employee?.system_prompt ?? "");
   const [imProvider, setImProvider] = useState(employee?.im_provider ?? "feishu");
   const [imId, setImId] = useState(employee?.im_external_id ?? "");
   const [imHandle, setImHandle] = useState(employee?.im_handle ?? "");
@@ -29,6 +31,8 @@ export function ProfileModal({
     setErr(null);
     try {
       const updated = await api.updateEmployee(employee.id, {
+        name: name.trim() || employee.name,
+        system_prompt: note,
         im_provider: imProvider,
         im_external_id: imId.trim(),
         im_handle: imHandle.trim(),
@@ -64,6 +68,27 @@ export function ProfileModal({
             </div>
 
             <div className="mt-5 grid grid-cols-3 gap-3">
+              <label className="block col-span-3">
+                <div className="text-[12px] mb-1" style={{ color: "var(--text-2)" }}>
+                  {t("profile.name")}
+                </div>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={employee.name}
+                />
+              </label>
+              <label className="block col-span-3">
+                <div className="text-[12px] mb-1" style={{ color: "var(--text-2)" }}>
+                  {t("profile.note")}
+                </div>
+                <textarea
+                  rows={3}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder={t("profile.note_placeholder")}
+                />
+              </label>
               <label className="block">
                 <div className="text-[12px] mb-1" style={{ color: "var(--text-2)" }}>
                   {t("profile.im_provider")}
@@ -108,7 +133,7 @@ export function ProfileModal({
         ) : (
           <>
             <p className="mt-4 text-[13px]" style={{ color: "var(--text-2)" }}>
-              管理员账号无需绑定 IM。
+              {t("profile.no_employee")}
             </p>
             <div className="mt-6 flex items-center justify-end">
               <button type="button" onClick={onClose} className="btn">
